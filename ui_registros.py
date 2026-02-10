@@ -8,7 +8,7 @@ DB_NAME = 'inventariovlm.db'
 
 def mostrar_registros(root):
     # --- Lógica migrada desde app.py ---
-    def cargar_datos(order_by="counter_name"):
+    def cargar_datos(order_by="code_item"):
         valid_fields = [
             "counter_name", "count_date", "deposit_id", "rack_id", "location", "code_item",
             "boxqty", "boxunitqty", "boxunittotal", "magazijn", "winkel", "total", "current_inventory", "difference"

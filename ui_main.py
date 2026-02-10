@@ -184,6 +184,7 @@ def main():
             conn.close()
             messagebox.showwarning("Aviso", "Ya existe un registro para este código en inventory_count. Por favor revise la data introducida.")
             entry_code.focus_set()
+            entry_code.selection_range(0, tk.END)
             return
         alt_check = code.lstrip("0")
         if alt_check:
@@ -192,6 +193,7 @@ def main():
                 conn.close()
                 messagebox.showwarning("Aviso", "Ya existe un registro para este código (sin ceros iniciales) en inventory_count. Por favor revise la data introducida.")
                 entry_code.focus_set()
+                entry_code.selection_range(0, tk.END)
                 return
         conn.close()
         if row:
@@ -243,6 +245,7 @@ def main():
             conn.close()
             messagebox.showwarning("Aviso", "Ya existe un registro para este código en inventory_count. Por favor revise la data introducida.")
             entry_code.focus_set()
+            entry_code.selection_range(0, tk.END)
             return
         alt_check = code.lstrip("0")
         if alt_check:
@@ -251,6 +254,7 @@ def main():
                 conn.close()
                 messagebox.showwarning("Aviso", "Ya existe un registro para este código (sin ceros iniciales) en inventory_count. Por favor revise la data introducida.")
                 entry_code.focus_set()
+                entry_code.selection_range(0, tk.END)
                 return
         cur.execute("SELECT current_inventory FROM items WHERE code_item = ?", (code,))
         row = cur.fetchone()
@@ -371,7 +375,13 @@ def main():
         messagebox.showinfo("OK", f"Exportado correctamente: {file_path}")
 
     # Asociar eventos
-    entry_code.bind("<Return>", lambda e: (buscar_item(), entry_boxqty.focus_set()))
+    def on_code_enter(event=None):
+        buscar_item()
+        # Si el foco sigue en entry_code (por error), no mover
+        if entry_code.focus_get() == entry_code:
+            return
+        entry_boxqty.focus_set()
+    entry_code.bind("<Return>", on_code_enter)
 
     root.mainloop()
 
