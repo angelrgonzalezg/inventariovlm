@@ -19,6 +19,8 @@ def mostrar_registros(root):
             "total": "c.total",
             "current_inventory": "c.current_inventory",
             "difference": "c.difference",
+            "deposit_name": "d.deposit_description",
+            "rack_name": "r.rack_description",
             "location": "c.location",
             "count_date": "c.count_date"
         }
@@ -29,9 +31,13 @@ def mostrar_registros(root):
         cur = conn.cursor()
         cur.execute(f"""
             SELECT c.id, c.counter_name, c.code_item, COALESCE(i.description_item, ''), c.magazijn, c.winkel,
-                   c.total, c.current_inventory, c.difference, c.location, c.count_date
+                   c.total, c.current_inventory, c.difference,
+                   d.deposit_description, r.rack_description,
+                   c.location, c.count_date
             FROM inventory_count c
             LEFT JOIN items i ON i.code_item = c.code_item
+            LEFT JOIN deposits d ON d.deposit_id = c.deposit_id
+            LEFT JOIN racks r ON r.rack_id = c.rack_id
             ORDER BY {col_sql}
         """)
         for row in cur.fetchall():
@@ -43,9 +49,9 @@ def mostrar_registros(root):
 
     win = tk.Toplevel(root)
     win.title("Registros de Inventario")
-    win.geometry("1000x420")
+    win.geometry("1800x700")
 
-    cols = ("id", "counter_name", "code_item", "description_item", "magazijn", "winkel", "total", "current_inventory", "difference", "location", "count_date")
+    cols = ("id", "counter_name", "code_item", "description_item", "magazijn", "winkel", "total", "current_inventory", "difference", "deposit_name", "rack_name", "location", "count_date")
     tree = ttk.Treeview(win, columns=cols, show="headings", height=12)
     for col in cols:
         heading = col.replace("_", " ").title()
@@ -217,3 +223,6 @@ def mostrar_registros(root):
 
     # Aquí puedes agregar los botones y layout para actualizar/eliminar, etc.
     # ...
+
+    # Mostrar los datos al abrir la ventana
+    cargar_datos()

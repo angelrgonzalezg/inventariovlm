@@ -29,31 +29,11 @@ def main():
     combo_name = ttk.Combobox(frm, values=["Luzmery", "Malina", "Victoria"], width=18)
     combo_name.grid(row=0, column=1, sticky="w")
 
-    # Código
-    ttk.Label(frm, text="Código:").grid(row=1, column=0, sticky="e")
-    entry_code = ttk.Entry(frm, width=18)
-    entry_code.grid(row=1, column=1, sticky="w")
-
-    # Descripción
-    ttk.Label(frm, text="Descripción:").grid(row=2, column=0, sticky="e")
-    entry_desc = ttk.Entry(frm, width=36, state="readonly")
-    entry_desc.grid(row=2, column=1, sticky="w")
-
-    # Magazijn y Winkel
-    ttk.Label(frm, text="Magazijn:").grid(row=3, column=0, sticky="e")
-    entry_mag = ttk.Entry(frm, width=8)
-    entry_mag.grid(row=3, column=1, sticky="w")
-    entry_mag.insert(0, "0")
-
-    ttk.Label(frm, text="Winkel:").grid(row=4, column=0, sticky="e")
-    entry_win = ttk.Entry(frm, width=8)
-    entry_win.grid(row=4, column=1, sticky="w")
-    entry_win.insert(0, "0")
 
     # Fecha
-    ttk.Label(frm, text="Fecha:").grid(row=5, column=0, sticky="e")
+    ttk.Label(frm, text="Fecha:").grid(row=1, column=0, sticky="e")
     date_entry = DateEntry(frm, width=12)
-    date_entry.grid(row=5, column=1, sticky="w")
+    date_entry.grid(row=1, column=1, sticky="w")
 
     # Deposit y Rack
     deposits_list = get_deposits()
@@ -63,12 +43,33 @@ def main():
     # Si la descripción sigue vacía, usar rack_code
     if all(not val for val in racks_display):
         racks_display = [r[0] for r in racks_list]
-    ttk.Label(frm, text="Deposit:").grid(row=6, column=0, sticky="e")
+    ttk.Label(frm, text="Deposit:").grid(row=2, column=0, sticky="e")
     combo_deposit = ttk.Combobox(frm, values=deposits_display, state="readonly", width=14)
-    combo_deposit.grid(row=6, column=1, sticky="w")
-    ttk.Label(frm, text="Rack:").grid(row=7, column=0, sticky="e")
+    combo_deposit.grid(row=2, column=1, sticky="w")
+    ttk.Label(frm, text="Rack:").grid(row=3, column=0, sticky="e")
     combo_rack = ttk.Combobox(frm, values=racks_display, state="readonly", width=14)
-    combo_rack.grid(row=7, column=1, sticky="w")
+    combo_rack.grid(row=3, column=1, sticky="w")
+
+    # Código
+    ttk.Label(frm, text="Código:").grid(row=4, column=0, sticky="e")
+    entry_code = ttk.Entry(frm, width=18)
+    entry_code.grid(row=4, column=1, sticky="w")
+
+    # Descripción
+    ttk.Label(frm, text="Descripción:").grid(row=5, column=0, sticky="e")
+    entry_desc = ttk.Entry(frm, width=36, state="readonly")
+    entry_desc.grid(row=5, column=1, sticky="w")
+
+    # Magazijn y Winkel
+    ttk.Label(frm, text="Magazijn:").grid(row=6, column=0, sticky="e")
+    entry_mag = ttk.Entry(frm, width=8)
+    entry_mag.grid(row=6, column=1, sticky="w")
+    entry_mag.insert(0, "0")
+
+    ttk.Label(frm, text="Winkel:").grid(row=7, column=0, sticky="e")
+    entry_win = ttk.Entry(frm, width=8)
+    entry_win.grid(row=7, column=1, sticky="w")
+    entry_win.insert(0, "0")
 
     def on_deposit_change(event=None):
         # Ya no se actualiza racks por depósito, racks es independiente
@@ -78,6 +79,7 @@ def main():
     combo_deposit.bind("<<ComboboxSelected>>", on_deposit_change)
 
     # Location label
+
     lbl_location = ttk.Label(frm, text="")
     lbl_location.grid(row=8, column=1, sticky="w")
 
@@ -90,10 +92,10 @@ def main():
     btn_import.grid(row=10, column=0, pady=8)
     btn_buscar = ttk.Button(frm, text="Buscar", command=lambda: buscar_item())
     btn_buscar.grid(row=10, column=1, pady=8)
-    btn_guardar = ttk.Button(frm, text="Guardar", command=lambda: guardar())
-    btn_guardar.grid(row=11, column=0, pady=8)
     btn_export = ttk.Button(frm, text="Exportar", command=lambda: export_data())
-    btn_export.grid(row=11, column=1, pady=8)
+    btn_export.grid(row=11, column=0, pady=8)
+    btn_guardar = ttk.Button(frm, text="Guardar", command=lambda: guardar())
+    btn_guardar.grid(row=11, column=1, pady=8)
     btn_registros = ttk.Button(frm, text="Ver Registros", command=lambda: mostrar_registros(root))
     btn_registros.grid(row=12, column=0, columnspan=2, pady=10)
 
@@ -272,9 +274,13 @@ def main():
             df = pd.read_sql_query("""
                 SELECT c.id, c.counter_name, c.code_item,
                        COALESCE(i.description_item, '') AS description_item,
-                       c.magazijn, c.winkel, c.total, c.current_inventory, c.difference, c.location, c.count_date
+                       c.magazijn, c.winkel, c.total, c.current_inventory, c.difference,
+                       d.deposit_description AS deposit_name, r.rack_description AS rack_name,
+                       c.location, c.count_date
                 FROM inventory_count c
                 LEFT JOIN items i ON i.code_item = c.code_item
+                LEFT JOIN deposits d ON d.deposit_id = c.deposit_id
+                LEFT JOIN racks r ON r.rack_id = c.rack_id
                 ORDER BY c.counter_name
             """, conn)
         except Exception as e:
