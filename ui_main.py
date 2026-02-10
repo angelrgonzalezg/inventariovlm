@@ -16,6 +16,8 @@ DB_NAME = 'inventariovlm.db'
 # Por ahora solo el esqueleto para el refactor
 
 def main():
+    # ...widgets...
+    # (los binds van después de crear los widgets, sin indentación extra)
     root = tk.Tk()
     root.title("VLM Inventary")
     root.geometry("640x420")
@@ -88,6 +90,11 @@ def main():
     entry_win.grid(row=10, column=1, sticky="w")
     entry_win.insert(0, "0")
 
+    entry_boxqty.bind("<Return>", lambda e: entry_boxunitqty.focus_set())
+    entry_boxunitqty.bind("<Return>", lambda e: entry_mag.focus_set())
+    entry_mag.bind("<Return>", lambda e: entry_win.focus_set())
+    entry_win.bind("<Return>", lambda e: btn_guardar.focus_set())
+
     def on_deposit_change(event=None):
         # Ya no se actualiza racks por depósito, racks es independiente
         pass
@@ -120,15 +127,15 @@ def main():
 
     # --- Botones ---
     btn_import = ttk.Button(frm, text="Importar Catálogo", command=lambda: import_catalog())
-    btn_import.grid(row=10, column=0, pady=8)
+    btn_import.grid(row=20, column=0, pady=8)
     btn_buscar = ttk.Button(frm, text="Buscar", command=lambda: buscar_item())
-    btn_buscar.grid(row=10, column=1, pady=8)
+    btn_buscar.grid(row=20, column=1, pady=8)
     btn_export = ttk.Button(frm, text="Exportar", command=lambda: export_data())
-    btn_export.grid(row=11, column=0, pady=8)
+    btn_export.grid(row=21, column=0, pady=8)
     btn_guardar = ttk.Button(frm, text="Guardar", command=lambda: guardar())
-    btn_guardar.grid(row=11, column=1, pady=8)
+    btn_guardar.grid(row=21, column=1, pady=8)
     btn_registros = ttk.Button(frm, text="Ver Registros", command=lambda: mostrar_registros(root))
-    btn_registros.grid(row=12, column=0, columnspan=2, pady=10)
+    btn_registros.grid(row=22, column=0, columnspan=2, pady=10)
 
     # --- Callbacks principales (adaptados) ---
     def import_catalog():
@@ -193,9 +200,9 @@ def main():
             entry_desc.insert(0, row[0])
             entry_desc.config(state="readonly")
             lbl_current.config(text=f"Inventario actual: {row[1]}")
-            entry_mag.focus_set()
+            entry_boxqty.focus_set()
             try:
-                entry_mag.selection_range(0, tk.END)
+                entry_boxqty.selection_range(0, tk.END)
             except Exception:
                 pass
         else:
@@ -267,9 +274,9 @@ def main():
         diff = total - actual
         cur.execute("""
             INSERT INTO inventory_count
-            (counter_name, code_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, deposit_id, rack_id, location, count_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, stored_code, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, actual, diff, deposit_id, rack_id, location, selected_date.isoformat()))
+            (counter_name, code_item, magazijn, winkel, total, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, stored_code, magazijn, winkel, total, actual, diff, selected_date.isoformat(), location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal))
         conn.commit()
         conn.close()
         entry_code.delete(0, tk.END)
@@ -364,7 +371,7 @@ def main():
         messagebox.showinfo("OK", f"Exportado correctamente: {file_path}")
 
     # Asociar eventos
-    entry_code.bind("<Return>", buscar_item)
+    entry_code.bind("<Return>", lambda e: (buscar_item(), entry_boxqty.focus_set()))
 
     root.mainloop()
 

@@ -9,40 +9,30 @@ DB_NAME = 'inventariovlm.db'
 def mostrar_registros(root):
     # --- Lógica migrada desde app.py ---
     def cargar_datos(order_by="counter_name"):
-        mapping = {
-            "id": "c.id",
-            "counter_name": "c.counter_name",
-            "code_item": "c.code_item",
-            "description_item": "i.description_item",
-            "magazijn": "c.magazijn",
-            "winkel": "c.winkel",
-            "total": "c.total",
-            "current_inventory": "c.current_inventory",
-            "difference": "c.difference",
-            "deposit_name": "d.deposit_description",
-            "rack_name": "r.rack_description",
-            "location": "c.location",
-            "count_date": "c.count_date"
-        }
-        col_sql = mapping.get(order_by, "c.counter_name")
+        valid_fields = [
+            "counter_name", "count_date", "deposit_id", "rack_id", "location", "code_item",
+            "boxqty", "boxunitqty", "boxunittotal", "magazijn", "winkel", "total", "current_inventory", "difference"
+        ]
+        col_sql = order_by if order_by in valid_fields else "counter_name"
         for r in tree.get_children():
             tree.delete(r)
         conn = sqlite3.connect(DB_NAME)
         cur = conn.cursor()
-        cur.execute(f"""
-            SELECT c.id, c.counter_name, c.code_item, COALESCE(i.description_item, ''), c.magazijn, c.winkel,
-                   c.total, c.current_inventory, c.difference,
-                   d.deposit_description, r.rack_description,
-                   c.location, c.count_date
-            FROM inventory_count c
-            LEFT JOIN items i ON i.code_item = c.code_item
-            LEFT JOIN deposits d ON d.deposit_id = c.deposit_id
-            LEFT JOIN racks r ON r.rack_id = c.rack_id
-            ORDER BY {col_sql}
-        """)
-        for row in cur.fetchall():
-            tree.insert("", "end", values=row)
-        conn.close()
+        try:
+            cur.execute(f"""
+                SELECT c.counter_name, c.count_date, c.deposit_id, c.rack_id, c.location, c.code_item, c.boxqty, c.boxunitqty, c.boxunittotal, c.magazijn, c.winkel, c.total, c.current_inventory, c.difference
+                FROM inventory_count c
+                ORDER BY {col_sql}
+            """)
+            rows = cur.fetchall()
+            if not rows:
+                messagebox.showinfo("Sin datos", "No hay registros para mostrar.")
+            for row in rows:
+                tree.insert("", "end", values=row)
+        except Exception as e:
+            messagebox.showerror("Error de consulta", f"No se pudo cargar registros: {e}")
+        finally:
+            conn.close()
 
     def on_ordenar(col):
         cargar_datos(col)
@@ -51,7 +41,7 @@ def mostrar_registros(root):
     win.title("Registros de Inventario")
     win.geometry("1800x700")
 
-    cols = ("id", "counter_name", "code_item", "description_item", "boxqty", "boxunitqty", "boxunittotal", "magazijn", "winkel", "total", "current_inventory", "difference", "deposit_name", "rack_name", "location", "count_date")
+    cols = ("counter_name", "count_date", "deposit_id", "rack_id", "location", "code_item", "boxqty", "boxunitqty", "boxunittotal", "magazijn", "winkel", "total", "current_inventory", "difference")
     tree = ttk.Treeview(win, columns=cols, show="headings", height=12)
     for col in cols:
         heading = col.replace("_", " ").title()
@@ -67,6 +57,7 @@ def mostrar_registros(root):
     frm = ttk.Frame(win, padding=6)
     frm.pack(fill="x", padx=6, pady=(0,6))
 
+    # Entradas principales
     edit_counter = ttk.Entry(frm, width=14)
     edit_code = ttk.Entry(frm, width=12)
     edit_desc = ttk.Entry(frm, width=36, state="readonly")
@@ -75,27 +66,40 @@ def mostrar_registros(root):
     edit_total = ttk.Entry(frm, width=10, state="readonly")
     edit_current = ttk.Entry(frm, width=10, state="readonly")
     edit_diff = ttk.Entry(frm, width=10, state="readonly")
+
+    # Combobox de depósito y rack
     deposits_list = get_deposits()
-    cur.execute(f"""
-        SELECT c.id, c.counter_name, c.code_item, COALESCE(i.description_item, ''),
-               c.boxqty, c.boxunitqty, c.boxunittotal,
-               c.magazijn, c.winkel, c.total, c.current_inventory, c.difference,
-               d.deposit_description, r.rack_description,
-               c.location, c.count_date
-        FROM inventory_count c
-        LEFT JOIN items i ON i.code_item = c.code_item
-        LEFT JOIN deposits d ON d.deposit_id = c.deposit_id
-        LEFT JOIN racks r ON r.rack_id = c.rack_id
-        ORDER BY {col_sql}
-    """)
+    deposits_display = [d[1] for d in deposits_list]
+    edit_deposit = ttk.Combobox(frm, values=deposits_display, state="readonly", width=18)
+    edit_rack = ttk.Combobox(frm, values=[], state="readonly", width=18)
+
+    # Entradas adicionales
+    edit_location = ttk.Entry(frm, width=18, state="readonly")
+    edit_date = ttk.Entry(frm, width=18)
+
+    # racks_list se actualizará dinámicamente
+    racks_list = []
+
+    edit_mag.grid(row=0, column=3, padx=2, pady=2)
+    edit_win.grid(row=0, column=4, padx=2, pady=2)
+    edit_total.grid(row=0, column=5, padx=2, pady=2)
+    edit_current.grid(row=0, column=6, padx=2, pady=2)
+    edit_diff.grid(row=0, column=7, padx=2, pady=2)
+    edit_deposit.grid(row=0, column=8, padx=2, pady=2)
+    edit_rack.grid(row=0, column=9, padx=2, pady=2)
+    edit_location.grid(row=0, column=10, padx=2, pady=2)
+    edit_date.grid(row=0, column=11, padx=2, pady=2)
+
+    # (Eliminada la segunda definición de tree)
     def on_edit_deposit_change(event=None):
         idx = edit_deposit.current()
         if idx < 0:
             edit_rack['values'] = []
             return
         deposit_id = deposits_list[idx][0]
-        racks_list_local = get_racks_func(deposit_id)
-        racks_display_local = [r[1] for r in racks_list_local]
+        nonlocal racks_list
+        racks_list = get_racks(deposit_id)
+        racks_display_local = [r[1] for r in racks_list]
         edit_rack['values'] = racks_display_local
         if racks_display_local:
             edit_rack.current(0)
@@ -126,8 +130,9 @@ def mostrar_registros(root):
             edit_deposit.set(vals[9])
             idx = deposits_display.index(vals[9])
             deposit_id = deposits_list[idx][0]
-            racks_list_local = get_racks_func(deposit_id)
-            racks_display_local = [r[1] for r in racks_list_local]
+            nonlocal racks_list
+            racks_list = get_racks(deposit_id)
+            racks_display_local = [r[1] for r in racks_list]
             edit_rack['values'] = racks_display_local
             if vals[10] in racks_display_local:
                 edit_rack.set(vals[10])
