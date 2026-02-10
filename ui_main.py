@@ -16,6 +16,68 @@ DB_NAME = 'inventariovlm.db'
 # Por ahora solo el esqueleto para el refactor
 
 def main():
+    def importar_inventory():
+            file_path = os.path.join(os.path.dirname(__file__), 'csv', 'Deposit_1_Victoria.csv')
+            if not os.path.exists(file_path):
+                messagebox.showerror("Error", f"No se encontró el archivo: {file_path}")
+                return
+            df = pd.read_csv(file_path, dtype=str, keep_default_na=False)
+            # Normalizar nombres de columnas
+            df = df.rename(columns={
+                'codeitem': 'code_item',
+                'boxqty': 'boxqty',
+                'boxunitqty': 'boxunitqty',
+                'boxunittotal': 'boxunittotal',
+                'magazijn': 'magazijn',
+                'winkel': 'winkel',
+                'total': 'total',
+                'counter_name': 'counter_name',
+                'deposit_id': 'deposit_id',
+                'rack_id': 'rack_id',
+                'count_date': 'count_date',
+            })
+            # Conversión de tipos y valores
+            for col in ['boxqty', 'boxunitqty', 'boxunittotal', 'magazijn', 'winkel', 'total', 'deposit_id', 'rack_id']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col].replace('', 0), errors='coerce').fillna(0).astype(int)
+            # Formatear fecha a ISO
+            if 'count_date' in df.columns:
+                df['count_date'] = df['count_date'].apply(lambda d: datetime.strptime(d, '%d-%m-%Y').date().isoformat() if d else datetime.now().date().isoformat())
+            # Insertar en la base de datos
+            conn = sqlite3.connect(DB_NAME)
+            cur = conn.cursor()
+            insertados = 0
+            for _, row in df.iterrows():
+                # Evitar duplicados por code_item y fecha
+                cur.execute("SELECT COUNT(1) FROM inventory_count WHERE code_item = ? AND count_date = ?", (row['code_item'], row['count_date']))
+                if cur.fetchone()[0] > 0:
+                    continue
+                cur.execute("""
+                    INSERT INTO inventory_count
+                    (counter_name, code_item, magazijn, winkel, total, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row.get('counter_name', ''),
+                    row.get('code_item', ''),
+                    row.get('magazijn', 0),
+                    row.get('winkel', 0),
+                    row.get('total', 0),
+                    0, # current_inventory (no viene en CSV)
+                    row.get('total', 0), # difference (igual a total si no hay current_inventory)
+                    row.get('count_date', datetime.now().date().isoformat()),
+                    '', # location (puedes mejorar si quieres)
+                    row.get('deposit_id', 0),
+                    row.get('rack_id', 0),
+                    row.get('boxqty', 0),
+                    row.get('boxunitqty', 0),
+                    row.get('boxunittotal', 0)
+                ))
+                insertados += 1
+            conn.commit()
+            conn.close()
+            messagebox.showinfo("Importación completada", f"Se importaron {insertados} registros desde Deposit_1_Victoria.csv")
+
     # ...widgets...
     # (los binds van después de crear los widgets, sin indentación extra)
     root = tk.Tk()
@@ -25,6 +87,9 @@ def main():
     # --- Widgets principales ---
     frm = ttk.Frame(root, padding=10)
     frm.pack(fill="both", expand=True)
+
+    btn_importar_inventory = ttk.Button(frm, text="Importar Inventory", command=importar_inventory)
+    btn_importar_inventory.grid(row=23, column=0, columnspan=2, pady=10)
 
     # Nombre del contador
     ttk.Label(frm, text="Contador:").grid(row=0, column=0, sticky="e")
