@@ -60,15 +60,32 @@ def main():
     entry_desc = ttk.Entry(frm, width=36, state="readonly")
     entry_desc.grid(row=5, column=1, sticky="w")
 
+
+    # Boxqty y BoxUnitqty
+    ttk.Label(frm, text="Boxqty:").grid(row=6, column=0, sticky="e")
+    entry_boxqty = ttk.Entry(frm, width=8)
+    entry_boxqty.grid(row=6, column=1, sticky="w")
+    entry_boxqty.insert(0, "0")
+
+    ttk.Label(frm, text="BoxUnitqty:").grid(row=7, column=0, sticky="e")
+    entry_boxunitqty = ttk.Entry(frm, width=8)
+    entry_boxunitqty.grid(row=7, column=1, sticky="w")
+    entry_boxunitqty.insert(0, "0")
+
+    ttk.Label(frm, text="BoxUnitTotal:").grid(row=8, column=0, sticky="e")
+    entry_boxunittotal = ttk.Entry(frm, width=10, state="readonly")
+    entry_boxunittotal.grid(row=8, column=1, sticky="w")
+    entry_boxunittotal.insert(0, "0")
+
     # Magazijn y Winkel
-    ttk.Label(frm, text="Magazijn:").grid(row=6, column=0, sticky="e")
+    ttk.Label(frm, text="Magazijn:").grid(row=9, column=0, sticky="e")
     entry_mag = ttk.Entry(frm, width=8)
-    entry_mag.grid(row=6, column=1, sticky="w")
+    entry_mag.grid(row=9, column=1, sticky="w")
     entry_mag.insert(0, "0")
 
-    ttk.Label(frm, text="Winkel:").grid(row=7, column=0, sticky="e")
+    ttk.Label(frm, text="Winkel:").grid(row=10, column=0, sticky="e")
     entry_win = ttk.Entry(frm, width=8)
-    entry_win.grid(row=7, column=1, sticky="w")
+    entry_win.grid(row=10, column=1, sticky="w")
     entry_win.insert(0, "0")
 
     def on_deposit_change(event=None):
@@ -81,11 +98,25 @@ def main():
     # Location label
 
     lbl_location = ttk.Label(frm, text="")
-    lbl_location.grid(row=8, column=1, sticky="w")
+    lbl_location.grid(row=11, column=1, sticky="w")
 
     # Inventario actual
     lbl_current = ttk.Label(frm, text="Inventario actual: ")
-    lbl_current.grid(row=9, column=1, sticky="w")
+    lbl_current.grid(row=12, column=1, sticky="w")
+    def update_boxunittotal(*args):
+        try:
+            boxqty = int(entry_boxqty.get())
+            boxunitqty = int(entry_boxunitqty.get())
+            total = boxqty * boxunitqty
+        except Exception:
+            total = 0
+        entry_boxunittotal.config(state="normal")
+        entry_boxunittotal.delete(0, tk.END)
+        entry_boxunittotal.insert(0, str(total))
+        entry_boxunittotal.config(state="readonly")
+
+    entry_boxqty.bind("<KeyRelease>", update_boxunittotal)
+    entry_boxunitqty.bind("<KeyRelease>", update_boxunittotal)
 
     # --- Botones ---
     btn_import = ttk.Button(frm, text="Importar Catálogo", command=lambda: import_catalog())
@@ -175,6 +206,9 @@ def main():
         try:
             name = combo_name.get()
             code = entry_code.get().strip()
+            boxqty = int(entry_boxqty.get())
+            boxunitqty = int(entry_boxunitqty.get())
+            boxunittotal = boxqty * boxunitqty
             magazijn = int(entry_mag.get())
             winkel = int(entry_win.get())
             selected_date = date_entry.get_date() if DateEntry else datetime.now().date()
@@ -226,17 +260,23 @@ def main():
             conn.close()
             return
         actual = row[0]
-        total = magazijn + winkel
+        boxqty = int(entry_boxqty.get())
+        boxunitqty = int(entry_boxunitqty.get())
+        boxunittotal = boxqty * boxunitqty
+        total = boxunittotal + magazijn + winkel
         diff = total - actual
         cur.execute("""
             INSERT INTO inventory_count
-            (counter_name, code_item, magazijn, winkel, total, current_inventory, difference, deposit_id, rack_id, location, count_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, stored_code, magazijn, winkel, total, actual, diff, deposit_id, rack_id, location, selected_date.isoformat()))
+            (counter_name, code_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, deposit_id, rack_id, location, count_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, stored_code, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, actual, diff, deposit_id, rack_id, location, selected_date.isoformat()))
         conn.commit()
         conn.close()
         entry_code.delete(0, tk.END)
         entry_desc.config(state="normal"); entry_desc.delete(0, tk.END); entry_desc.config(state="readonly")
+        entry_boxqty.delete(0, tk.END); entry_boxqty.insert(0, "0")
+        entry_boxunitqty.delete(0, tk.END); entry_boxunitqty.insert(0, "0")
+        entry_boxunittotal.config(state="normal"); entry_boxunittotal.delete(0, tk.END); entry_boxunittotal.insert(0, "0"); entry_boxunittotal.config(state="readonly")
         entry_mag.delete(0, tk.END); entry_mag.insert(0, "0")
         entry_win.delete(0, tk.END); entry_win.insert(0, "0")
         lbl_location.config(text="")
@@ -244,6 +284,9 @@ def main():
         messagebox.showinfo("OK", "Registro guardado")
         # Reset campos
         entry_code.delete(0, tk.END)
+        entry_boxqty.delete(0, tk.END); entry_boxqty.insert(0, "0")
+        entry_boxunitqty.delete(0, tk.END); entry_boxunitqty.insert(0, "0")
+        entry_boxunittotal.config(state="normal"); entry_boxunittotal.delete(0, tk.END); entry_boxunittotal.insert(0, "0"); entry_boxunittotal.config(state="readonly")
         entry_mag.delete(0, tk.END)
         entry_mag.insert(0, "0")
         entry_win.delete(0, tk.END)
@@ -274,6 +317,7 @@ def main():
             df = pd.read_sql_query("""
                 SELECT c.id, c.counter_name, c.code_item,
                        COALESCE(i.description_item, '') AS description_item,
+                       c.boxqty, c.boxunitqty, c.boxunittotal,
                        c.magazijn, c.winkel, c.total, c.current_inventory, c.difference,
                        d.deposit_description AS deposit_name, r.rack_description AS rack_name,
                        c.location, c.count_date

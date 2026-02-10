@@ -51,7 +51,7 @@ def mostrar_registros(root):
     win.title("Registros de Inventario")
     win.geometry("1800x700")
 
-    cols = ("id", "counter_name", "code_item", "description_item", "magazijn", "winkel", "total", "current_inventory", "difference", "deposit_name", "rack_name", "location", "count_date")
+    cols = ("id", "counter_name", "code_item", "description_item", "boxqty", "boxunitqty", "boxunittotal", "magazijn", "winkel", "total", "current_inventory", "difference", "deposit_name", "rack_name", "location", "count_date")
     tree = ttk.Treeview(win, columns=cols, show="headings", height=12)
     for col in cols:
         heading = col.replace("_", " ").title()
@@ -76,18 +76,18 @@ def mostrar_registros(root):
     edit_current = ttk.Entry(frm, width=10, state="readonly")
     edit_diff = ttk.Entry(frm, width=10, state="readonly")
     deposits_list = get_deposits()
-    deposits_display = [d[1] for d in deposits_list]
-    get_racks_func = get_racks()
-    if deposits_list:
-        racks_list = get_racks_func(deposits_list[0][0])
-    else:
-        racks_list = []
-    racks_display = [r[1] for r in racks_list]
-    edit_deposit = ttk.Combobox(frm, values=deposits_display, state="readonly", width=14)
-    edit_rack = ttk.Combobox(frm, values=racks_display, state="readonly", width=14)
-    edit_location = ttk.Entry(frm, width=25, state="readonly")
-    edit_date = ttk.Entry(frm, width=18)
-
+    cur.execute(f"""
+        SELECT c.id, c.counter_name, c.code_item, COALESCE(i.description_item, ''),
+               c.boxqty, c.boxunitqty, c.boxunittotal,
+               c.magazijn, c.winkel, c.total, c.current_inventory, c.difference,
+               d.deposit_description, r.rack_description,
+               c.location, c.count_date
+        FROM inventory_count c
+        LEFT JOIN items i ON i.code_item = c.code_item
+        LEFT JOIN deposits d ON d.deposit_id = c.deposit_id
+        LEFT JOIN racks r ON r.rack_id = c.rack_id
+        ORDER BY {col_sql}
+    """)
     def on_edit_deposit_change(event=None):
         idx = edit_deposit.current()
         if idx < 0:
