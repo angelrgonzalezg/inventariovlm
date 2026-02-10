@@ -1,0 +1,6 @@
+# requirements.txt
+
+tkinter
+pandas
+openpyxl
+sqlite3

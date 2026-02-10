@@ -1,0 +1,5 @@
+id,counter_name,code_item,description_item,magazijn,winkel,total,current_inventory,difference,count_date
+1,Luzmery,0101,VD DRAAD 1.5 mm  ZWART,7,0,7,0,7,2026-01-30T15:35:40.951458
+3,Luzmery,0102,VD DRAAD 2.5 mm  BRUIN,2,0,2,0,2,2026-01-30T15:45:57.071279
+4,Luzmery,0101,VD DRAAD 1.5 mm  ZWART,1,0,1,0,1,2026-01-30T16:27:09.829196
+5,Luzmery,0101,VD DRAAD 1.5 mm  ZWART,2,0,2,0,2,2026-01-30T16:27:18.979283

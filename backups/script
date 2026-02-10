@@ -1,0 +1,33 @@
+-- ============================================
+-- Base de datos: inventariovlm
+-- Motor: SQLite
+-- ============================================
+
+-- Tabla de catálogo de items
+CREATE TABLE IF NOT EXISTS items (
+    number TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    current_inventory INTEGER DEFAULT 0
+);
+
+-- Tabla de conteo de inventario
+CREATE TABLE IF NOT EXISTS inventory_count (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    counter_name TEXT NOT NULL,
+    item_number TEXT NOT NULL,
+    magazijn INTEGER DEFAULT 0,
+    winkel INTEGER DEFAULT 0,
+    total INTEGER,
+    current_inventory INTEGER,
+    difference INTEGER,
+    count_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (item_number) REFERENCES items(number)
+);
+
+-- Índice para mejorar búsquedas por código
+CREATE INDEX IF NOT EXISTS idx_inventory_item
+ON inventory_count (item_number);
+
+-- Índice por persona (opcional)
+CREATE INDEX IF NOT EXISTS idx_inventory_counter
+ON inventory_count (counter_name);
