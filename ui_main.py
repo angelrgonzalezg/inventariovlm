@@ -89,11 +89,11 @@ def main():
     frm.pack(fill="both", expand=True)
 
     btn_importar_inventory = ttk.Button(frm, text="Importar Inventory", command=importar_inventory)
-    btn_importar_inventory.grid(row=23, column=0, columnspan=2, pady=10)
-
+    #btn_importar_inventory.grid(row=22, column=0, columnspan=2, pady=10)
+    btn_importar_inventory.grid(row=22, column=0, pady=8)
     # Nombre del contador
     ttk.Label(frm, text="Contador:").grid(row=0, column=0, sticky="e")
-    combo_name = ttk.Combobox(frm, values=["Luzmery", "Malina", "Victoria"], width=18)
+    combo_name = ttk.Combobox(frm, values=["LUZMERY", "MALINA", "VICTORIA"], width=18)
     combo_name.grid(row=0, column=1, sticky="w")
 
 
@@ -118,7 +118,6 @@ def main():
     combo_rack.grid(row=3, column=1, sticky="w")
 
     # Código
-    ttk.Label(frm, text="Código:").grid(row=4, column=0, sticky="e")
     entry_code = ttk.Entry(frm, width=18)
     entry_code.grid(row=4, column=1, sticky="w")
 
@@ -155,10 +154,27 @@ def main():
     entry_win.grid(row=10, column=1, sticky="w")
     entry_win.insert(0, "0")
 
-    entry_boxqty.bind("<Return>", lambda e: entry_boxunitqty.focus_set())
-    entry_boxunitqty.bind("<Return>", lambda e: entry_mag.focus_set())
-    entry_mag.bind("<Return>", lambda e: entry_win.focus_set())
-    entry_win.bind("<Return>", lambda e: btn_guardar.focus_set())
+    def on_boxqty_enter(event=None):
+        entry_boxunitqty.focus_set()
+        entry_boxunitqty.selection_range(0, tk.END)
+
+    def on_boxunitqty_enter(event=None):
+        entry_mag.focus_set()
+        entry_mag.selection_range(0, tk.END)
+
+    def on_magazijn_enter(event=None):
+        entry_win.focus_set()
+        entry_win.selection_range(0, tk.END)
+
+    def on_winkel_enter(event=None):
+        btn_guardar.focus_set()
+        if isinstance(btn_guardar, ttk.Entry):
+            btn_guardar.selection_range(0, tk.END)
+
+    entry_boxqty.bind("<Return>", on_boxqty_enter)
+    entry_boxunitqty.bind("<Return>", on_boxunitqty_enter)
+    entry_mag.bind("<Return>", on_magazijn_enter)
+    entry_win.bind("<Return>", on_winkel_enter)
 
     def on_deposit_change(event=None):
         # Ya no se actualiza racks por depósito, racks es independiente
@@ -174,7 +190,7 @@ def main():
 
     # Inventario actual
     lbl_current = ttk.Label(frm, text="Inventario actual: ")
-    lbl_current.grid(row=12, column=1, sticky="w")
+    lbl_current.grid(row=12, column=0, sticky="w")
     def update_boxunittotal(*args):
         try:
             boxqty = int(entry_boxqty.get())
@@ -191,16 +207,19 @@ def main():
     entry_boxunitqty.bind("<KeyRelease>", update_boxunittotal)
 
     # --- Botones ---
-    btn_import = ttk.Button(frm, text="Importar Catálogo", command=lambda: import_catalog())
-    btn_import.grid(row=20, column=0, pady=8)
-    btn_buscar = ttk.Button(frm, text="Buscar", command=lambda: buscar_item())
-    btn_buscar.grid(row=20, column=1, pady=8)
     btn_export = ttk.Button(frm, text="Exportar", command=lambda: export_data())
-    btn_export.grid(row=21, column=0, pady=8)
+    btn_export.grid(row=20, column=0, pady=8)
     btn_guardar = ttk.Button(frm, text="Guardar", command=lambda: guardar())
-    btn_guardar.grid(row=21, column=1, pady=8)
+    btn_guardar.grid(row=20, column=1, pady=8)
+    btn_import = ttk.Button(frm, text="Importar Catálogo", command=lambda: import_catalog())
+    btn_import.grid(row=21, column=0, pady=8)
+    btn_buscar = ttk.Button(frm, text="Buscar", command=lambda: buscar_item())
+    btn_buscar.grid(row=21, column=1, pady=8)
+    msg_guardado = tk.StringVar()
+    lbl_guardado = ttk.Label(frm, textvariable=msg_guardado, foreground="green")
+    lbl_guardado.grid(row=20, column=2, padx=8, sticky="w")
     btn_registros = ttk.Button(frm, text="Ver Registros", command=lambda: mostrar_registros(root))
-    btn_registros.grid(row=22, column=0, columnspan=2, pady=10)
+    btn_registros.grid(row=22, column=1, pady=8)
 
     # --- Callbacks principales (adaptados) ---
     def import_catalog():
@@ -357,7 +376,8 @@ def main():
         entry_win.delete(0, tk.END); entry_win.insert(0, "0")
         lbl_location.config(text="")
         entry_code.focus_set()
-        messagebox.showinfo("OK", "Registro guardado")
+        msg_guardado.set("Registro guardado")
+        root.after(2000, lambda: msg_guardado.set(""))
         # Reset campos
         entry_code.delete(0, tk.END)
         entry_boxqty.delete(0, tk.END); entry_boxqty.insert(0, "0")
@@ -374,13 +394,7 @@ def main():
             lbl_location.config(text="")
         except Exception:
             pass
-        try:
-            if DateEntry:
-                date_entry.set_date(datetime.now().date())
-            else:
-                date_entry.delete(0, tk.END); date_entry.insert(0, datetime.now().date().isoformat())
-        except Exception:
-            pass
+        # No reiniciar la fecha de conteo, mantener la que el usuario colocó
         entry_code.focus_set()
 
     def export_data():
