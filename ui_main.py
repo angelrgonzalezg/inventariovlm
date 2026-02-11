@@ -17,32 +17,37 @@ DB_NAME = 'inventariovlm.db'
 
 def main():
     def importar_inventory():
-            file_path = os.path.join(os.path.dirname(__file__), 'csv', 'Deposit_1_Victoria.csv')
-            if not os.path.exists(file_path):
-                messagebox.showerror("Error", f"No se encontró el archivo: {file_path}")
-                return
-            df = pd.read_csv(file_path, dtype=str, keep_default_na=False)
-            # Normalizar nombres de columnas
-            df = df.rename(columns={
-                'codeitem': 'code_item',
-                'boxqty': 'boxqty',
-                'boxunitqty': 'boxunitqty',
-                'boxunittotal': 'boxunittotal',
-                'magazijn': 'magazijn',
-                'winkel': 'winkel',
-                'total': 'total',
-                'counter_name': 'counter_name',
-                'deposit_id': 'deposit_id',
-                'rack_id': 'rack_id',
-                'count_date': 'count_date',
-            })
-            # Conversión de tipos y valores
-            for col in ['boxqty', 'boxunitqty', 'boxunittotal', 'magazijn', 'winkel', 'total', 'deposit_id', 'rack_id']:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col].replace('', 0), errors='coerce').fillna(0).astype(int)
-            # Formatear fecha a ISO
-            if 'count_date' in df.columns:
-                df['count_date'] = df['count_date'].apply(lambda d: datetime.strptime(d, '%d-%m-%Y').date().isoformat() if d else datetime.now().date().isoformat())
+        file_path = filedialog.askopenfilename(
+            title="Selecciona archivo de inventario",
+            filetypes=[("CSV Files", "*.csv"), ("Todos los archivos", "*.*")]
+        )
+        if not file_path:
+            return
+        if not os.path.exists(file_path):
+            messagebox.showerror("Error", f"No se encontró el archivo: {file_path}")
+            return
+        df = pd.read_csv(file_path, dtype=str, keep_default_na=False)
+        # Normalizar nombres de columnas
+        df = df.rename(columns={
+            'codeitem': 'code_item',
+            'boxqty': 'boxqty',
+            'boxunitqty': 'boxunitqty',
+            'boxunittotal': 'boxunittotal',
+            'magazijn': 'magazijn',
+            'winkel': 'winkel',
+            'total': 'total',
+            'counter_name': 'counter_name',
+            'deposit_id': 'deposit_id',
+            'rack_id': 'rack_id',
+            'count_date': 'count_date',
+        })
+        # Conversión de tipos y valores
+        for col in ['boxqty', 'boxunitqty', 'boxunittotal', 'magazijn', 'winkel', 'total', 'deposit_id', 'rack_id']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col].replace('', 0), errors='coerce').fillna(0).astype(int)
+        # Formatear fecha a ISO
+        if 'count_date' in df.columns:
+            df['count_date'] = df['count_date'].apply(lambda d: datetime.strptime(d, '%d-%m-%Y').date().isoformat() if d else datetime.now().date().isoformat())
             # Insertar en la base de datos
             conn = sqlite3.connect(DB_NAME)
             cur = conn.cursor()
@@ -118,6 +123,7 @@ def main():
     combo_rack.grid(row=3, column=1, sticky="w")
 
     # Código
+    ttk.Label(frm, text="Producto:").grid(row=4, column=0, sticky="e")
     entry_code = ttk.Entry(frm, width=18)
     entry_code.grid(row=4, column=1, sticky="w")
 
