@@ -48,37 +48,42 @@ def main():
         # Formatear fecha a ISO
         if 'count_date' in df.columns:
             df['count_date'] = df['count_date'].apply(lambda d: datetime.strptime(d, '%d-%m-%Y').date().isoformat() if d else datetime.now().date().isoformat())
-            # Insertar en la base de datos
-            conn = sqlite3.connect(DB_NAME)
-            cur = conn.cursor()
-            insertados = 0
-            for _, row in df.iterrows():
-                # Evitar duplicados por code_item y fecha
-                cur.execute("SELECT COUNT(1) FROM inventory_count WHERE code_item = ? AND count_date = ?", (row['code_item'], row['count_date']))
-                if cur.fetchone()[0] > 0:
+        # Insertar en la base de datos
+        conn = sqlite3.connect(DB_NAME)
+        cur = conn.cursor()
+        insertados = 0
+        for _, row in df.iterrows():
+            cur.execute("SELECT * FROM inventory_count WHERE code_item = ?", (row['code_item'],))
+            existing = cur.fetchall()
+            if existing:
+                # Mostrar los registros existentes en un diálogo
+                info = '\n'.join([f"ID: {r[0]}, CODE_ITEM: {r[2]}, FECHA: {r[8]}, TOTAL: {r[5]}" for r in existing])
+                respuesta = messagebox.askyesno("Registro existente", f"Ya existe(n) registro(s) con CODE_ITEM '{row['code_item']}':\n\n{info}\n\n¿Deseas agregar el nuevo registro igualmente?")
+                if not respuesta:
+                    # Si responde NO, saltar este registro
                     continue
-                cur.execute("""
-                    INSERT INTO inventory_count
-                    (counter_name, code_item, magazijn, winkel, total, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    row.get('counter_name', ''),
-                    row.get('code_item', ''),
-                    row.get('magazijn', 0),
-                    row.get('winkel', 0),
-                    row.get('total', 0),
-                    0, # current_inventory (no viene en CSV)
-                    row.get('total', 0), # difference (igual a total si no hay current_inventory)
-                    row.get('count_date', datetime.now().date().isoformat()),
-                    '', # location (puedes mejorar si quieres)
-                    row.get('deposit_id', 0),
-                    row.get('rack_id', 0),
-                    row.get('boxqty', 0),
-                    row.get('boxunitqty', 0),
-                    row.get('boxunittotal', 0)
-                ))
-                insertados += 1
+            cur.execute("""
+                INSERT INTO inventory_count
+                (counter_name, code_item, magazijn, winkel, total, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row.get('counter_name', ''),
+                row.get('code_item', ''),
+                row.get('magazijn', 0),
+                row.get('winkel', 0),
+                row.get('total', 0),
+                0, # current_inventory (no viene en CSV)
+                row.get('total', 0), # difference (igual a total si no hay current_inventory)
+                row.get('count_date', datetime.now().date().isoformat()),
+                '', # location (puedes mejorar si quieres)
+                row.get('deposit_id', 0),
+                row.get('rack_id', 0),
+                row.get('boxqty', 0),
+                row.get('boxunitqty', 0),
+                row.get('boxunittotal', 0)
+            ))
+            insertados += 1
             conn.commit()
             conn.close()
             messagebox.showinfo("Importación completada", f"Se importaron {insertados} registros desde Deposit_1_Victoria.csv")
@@ -133,18 +138,18 @@ def main():
     entry_desc.grid(row=5, column=1, sticky="w")
 
 
-    # Cajas y BoxUnitqty
-    ttk.Label(frm, text="Cajas:").grid(row=6, column=0, sticky="e")
+    # Boxqty y BoxUnitqty
+    ttk.Label(frm, text="Boxqty:").grid(row=6, column=0, sticky="e")
     entry_boxqty = ttk.Entry(frm, width=8)
     entry_boxqty.grid(row=6, column=1, sticky="w")
     entry_boxqty.insert(0, "0")
 
-    ttk.Label(frm, text="Unidades por caja:").grid(row=7, column=0, sticky="e")
+    ttk.Label(frm, text="BoxUnitqty:").grid(row=7, column=0, sticky="e")
     entry_boxunitqty = ttk.Entry(frm, width=8)
     entry_boxunitqty.grid(row=7, column=1, sticky="w")
     entry_boxunitqty.insert(0, "0")
 
-    ttk.Label(frm, text="Total en cajas:").grid(row=8, column=0, sticky="e")
+    ttk.Label(frm, text="BoxUnitTotal:").grid(row=8, column=0, sticky="e")
     entry_boxunittotal = ttk.Entry(frm, width=10, state="readonly")
     entry_boxunittotal.grid(row=8, column=1, sticky="w")
     entry_boxunittotal.insert(0, "0")
@@ -226,15 +231,6 @@ def main():
     lbl_guardado.grid(row=20, column=2, padx=8, sticky="w")
     btn_registros = ttk.Button(frm, text="Ver Registros", command=lambda: mostrar_registros(root))
     btn_registros.grid(row=22, column=1, pady=8)
-
-    # Botón para generar reporte PDF (usa ui_pdf_report.add_pdf_report_button)
-    from ui_pdf_report import add_pdf_report_button
-    btn_pdf = add_pdf_report_button(frm, db_path=DB_NAME, button_text="Generar PDF")
-    # Reubicar el botón para que quede alineado con los demás (si la función lo colocó con grid)
-    try:
-        btn_pdf.grid(row=22, column=2, pady=8)
-    except Exception:
-        pass
 
     # --- Callbacks principales (adaptados) ---
     def import_catalog():
