@@ -53,10 +53,20 @@ def main():
             cur = conn.cursor()
             insertados = 0
             for _, row in df.iterrows():
-                # Evitar duplicados por code_item y fecha
-                cur.execute("SELECT COUNT(1) FROM inventory_count WHERE code_item = ? AND count_date = ?", (row['code_item'], row['count_date']))
-                if cur.fetchone()[0] > 0:
-                    continue
+                cur.execute("SELECT * FROM inventory_count WHERE code_item = ? ORDER BY count_date, counter_name, deposit_id, rack_id", (row['code_item'],))
+                existing = cur.fetchall()
+                if existing:
+                    # Mostrar los registros existentes en un diálogo, ordenados
+                    info = '\n'.join([
+                        f"FECHA: {r[8]}, CONTADOR: {r[1]}, DEPÓSITO: {r[10]}, RACK: {r[11]}, TOTAL: {r[5]}" for r in existing
+                    ])
+                    respuesta = messagebox.askyesno(
+                        "Registro existente",
+                        f"Ya existe(n) registro(s) con CODE_ITEM '{row['code_item']}':\n\n{info}\n\n¿Deseas agregar el nuevo registro igualmente?"
+                    )
+                    if not respuesta:
+                        # Si responde NO, saltar este registro
+                        continue
                 cur.execute("""
                     INSERT INTO inventory_count
                     (counter_name, code_item, magazijn, winkel, total, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal)
@@ -278,19 +288,19 @@ def main():
             if alt:
                 cur.execute("SELECT description_item, current_inventory FROM items WHERE code_item = ?", (alt,))
                 row = cur.fetchone()
-        cur.execute("SELECT COUNT(1) FROM inventory_count WHERE code_item = ?", (code,))
-        if cur.fetchone()[0] > 0:
-            conn.close()
-            messagebox.showwarning("Aviso", "Ya existe un registro para este código en inventory_count. Por favor revise la data introducida.")
-            entry_code.focus_set()
-            entry_code.selection_range(0, tk.END)
-            return
-        alt_check = code.lstrip("0")
-        if alt_check:
-            cur.execute("SELECT COUNT(1) FROM inventory_count WHERE code_item = ?", (alt_check,))
-            if cur.fetchone()[0] > 0:
+        # Si ya existen registros para este code_item, mostrar ventana de confirmación
+        cur.execute("SELECT * FROM inventory_count WHERE code_item = ? ORDER BY count_date, counter_name, deposit_id, rack_id", (code,))
+        existing = cur.fetchall()
+        if existing:
+            info = '\n'.join([
+                f"FECHA: {r[8]}, CONTADOR: {r[1]}, DEPÓSITO: {r[10]}, RACK: {r[11]}, TOTAL: {r[5]}" for r in existing
+            ])
+            respuesta = messagebox.askyesno(
+                "Registro existente",
+                f"Ya existe(n) registro(s) con CODE_ITEM '{code}':\n\n{info}\n\n¿Deseas agregar el nuevo registro igualmente?"
+            )
+            if not respuesta:
                 conn.close()
-                messagebox.showwarning("Aviso", "Ya existe un registro para este código (sin ceros iniciales) en inventory_count. Por favor revise la data introducida.")
                 entry_code.focus_set()
                 entry_code.selection_range(0, tk.END)
                 return
