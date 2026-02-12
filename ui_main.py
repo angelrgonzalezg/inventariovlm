@@ -7,15 +7,33 @@ import pandas as pd
 from datetime import datetime
 import sys
 import os
-
 import sqlite3
-
 DB_NAME = 'inventariovlm.db'
-
-# Aquí irá la lógica principal de la UI, importando funciones de db_utils y ui_registros
-# Por ahora solo el esqueleto para el refactor
-
 def main():
+    def agregar_remark():
+        import tkinter.simpledialog
+        code = entry_code.get().strip()
+        if not code:
+            messagebox.showwarning("Aviso", "Primero ingresa o selecciona un código de producto.")
+            return
+        conn = sqlite3.connect(DB_NAME)
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM inventory_count WHERE code_item = ? ORDER BY id DESC LIMIT 1", (code,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            messagebox.showwarning("Aviso", "No hay registro para este código en inventory_count.")
+            return
+        remark = tkinter.simpledialog.askstring("Agregar Remark", "Ingrese la anotación (máx 100 caracteres):")
+        if remark is None:
+            conn.close()
+            return
+        remark = remark[:100]
+        cur.execute("UPDATE inventory_count SET remarks = ? WHERE id = ?", (remark, row[0]))
+        conn.commit()
+        conn.close()
+        messagebox.showinfo("OK", "Remark guardado correctamente.")
+
     def importar_inventory():
         file_path = filedialog.askopenfilename(
             title="Selecciona archivo de inventario",
@@ -104,8 +122,11 @@ def main():
     frm.pack(fill="both", expand=True)
 
     btn_importar_inventory = ttk.Button(frm, text="Importar Inventory", command=importar_inventory)
-    #btn_importar_inventory.grid(row=22, column=0, columnspan=2, pady=10)
     btn_importar_inventory.grid(row=22, column=0, pady=8)
+
+    # Botón Remarks junto a Guardar, con estilo destacado
+    btn_remarks = ttk.Button(frm, text="Agregar Remark", command=agregar_remark)
+    btn_remarks.grid(row=20, column=2, padx=8, pady=8, sticky="w")
     # Nombre del contador
     ttk.Label(frm, text="Contador:").grid(row=0, column=0, sticky="e")
     combo_name = ttk.Combobox(frm, values=["LUZMERY", "MALINA", "VICTORIA"], width=18)
@@ -349,22 +370,7 @@ def main():
             return
         conn = sqlite3.connect(DB_NAME)
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(1) FROM inventory_count WHERE code_item = ?", (code,))
-        if cur.fetchone()[0] > 0:
-            conn.close()
-            messagebox.showwarning("Aviso", "Ya existe un registro para este código en inventory_count. Por favor revise la data introducida.")
-            entry_code.focus_set()
-            entry_code.selection_range(0, tk.END)
-            return
-        alt_check = code.lstrip("0")
-        if alt_check:
-            cur.execute("SELECT COUNT(1) FROM inventory_count WHERE code_item = ?", (alt_check,))
-            if cur.fetchone()[0] > 0:
-                conn.close()
-                messagebox.showwarning("Aviso", "Ya existe un registro para este código (sin ceros iniciales) en inventory_count. Por favor revise la data introducida.")
-                entry_code.focus_set()
-                entry_code.selection_range(0, tk.END)
-                return
+        # Ya no se valida si el código existe en inventory_count; se permite múltiples registros para el mismo code_item
         cur.execute("SELECT current_inventory FROM items WHERE code_item = ?", (code,))
         row = cur.fetchone()
         stored_code = code
