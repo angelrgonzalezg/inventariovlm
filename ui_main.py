@@ -259,11 +259,24 @@ def main():
     btn_registros.grid(row=22, column=1, pady=8)
 
     # Botón para generar reporte PDF (usa ui_pdf_report.add_pdf_report_button)
-    from ui_pdf_report import add_pdf_report_button
+    from ui_pdf_report import add_pdf_report_button, add_pdf_report_por_deposito_button, add_pdf_report_por_contador_button
     btn_pdf = add_pdf_report_button(frm, db_path=DB_NAME, button_text="Generar PDF")
-    # Reubicar el botón para que quede alineado con los demás (si la función lo colocó con grid)
     try:
         btn_pdf.grid(row=22, column=2, pady=8)
+    except Exception:
+        pass
+
+    # Botón para reporte por depósito
+    btn_pdf_deposito = add_pdf_report_por_deposito_button(frm, db_path=DB_NAME, button_text="Reporte por Depósito")
+    try:
+        btn_pdf_deposito.grid(row=23, column=2, pady=8)
+    except Exception:
+        pass
+
+    # Botón para reporte por contador
+    btn_pdf_contador = add_pdf_report_por_contador_button(frm, db_path=DB_NAME, button_text="Reporte por Contador")
+    try:
+        btn_pdf_contador.grid(row=24, column=2, pady=8)
     except Exception:
         pass
 
