@@ -25,6 +25,8 @@ def main():
         # Normalizar nombres de columnas
         df = df.rename(columns={
             'codeitem': 'code_item',
+            'remark': 'remarks',
+            'remarks': 'remarks',
             'boxqty': 'boxqty',
             'boxunitqty': 'boxunitqty',
             'boxunittotal': 'boxunittotal',
@@ -64,8 +66,8 @@ def main():
                         continue
                 cur.execute("""
                     INSERT INTO inventory_count
-                    (counter_name, code_item, magazijn, winkel, total, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (counter_name, code_item, magazijn, winkel, total, remarks, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row.get('counter_name', ''),
@@ -73,6 +75,7 @@ def main():
                     row.get('magazijn', 0),
                     row.get('winkel', 0),
                     row.get('total', 0),
+                    row.get('remarks', ''),
                     0, # current_inventory (no viene en CSV)
                     row.get('total', 0), # difference (igual a total si no hay current_inventory)
                     row.get('count_date', datetime.now().date().isoformat()),
