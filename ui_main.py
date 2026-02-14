@@ -258,6 +258,18 @@ def main():
     except Exception:
         pass
 
+    # Botón reporte de verificación (orden por id)
+    try:
+        from ui_pdf_report import add_pdf_report_verificacion_button
+        btn_pdf_verif = add_pdf_report_verificacion_button(frm, db_path=DB_NAME, button_text="Reporte Verificación")
+        try:
+            btn_pdf_verif.grid(row=25, column=2, pady=8)
+        except Exception:
+            pass
+    except Exception:
+        # if import fails, ignore
+        pass
+
     # --- Callbacks principales (adaptados) ---
     def import_catalog():
         file_path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
