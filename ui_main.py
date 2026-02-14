@@ -10,29 +10,6 @@ import os
 import sqlite3
 DB_NAME = 'inventariovlm.db'
 def main():
-    def agregar_remark():
-        import tkinter.simpledialog
-        code = entry_code.get().strip()
-        if not code:
-            messagebox.showwarning("Aviso", "Primero ingresa o selecciona un código de producto.")
-            return
-        conn = sqlite3.connect(DB_NAME)
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM inventory_count WHERE code_item = ? ORDER BY id DESC LIMIT 1", (code,))
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            messagebox.showwarning("Aviso", "No hay registro para este código en inventory_count.")
-            return
-        remark = tkinter.simpledialog.askstring("Agregar Remark", "Ingrese la anotación (máx 100 caracteres):")
-        if remark is None:
-            conn.close()
-            return
-        remark = remark[:100]
-        cur.execute("UPDATE inventory_count SET remarks = ? WHERE id = ?", (remark, row[0]))
-        conn.commit()
-        conn.close()
-        messagebox.showinfo("OK", "Remark guardado correctamente.")
 
     def importar_inventory():
         file_path = filedialog.askopenfilename(
@@ -124,9 +101,10 @@ def main():
     btn_importar_inventory = ttk.Button(frm, text="Importar Inventory", command=importar_inventory)
     btn_importar_inventory.grid(row=22, column=0, pady=8)
 
-    # Botón Remarks junto a Guardar, con estilo destacado
-    btn_remarks = ttk.Button(frm, text="Agregar Remark", command=agregar_remark)
-    btn_remarks.grid(row=20, column=2, padx=8, pady=8, sticky="w")
+    # Campo Remark después de Winkel
+    ttk.Label(frm, text="Comentario:").grid(row=11, column=0, sticky="e")
+    entry_remark = ttk.Entry(frm, width=36)
+    entry_remark.grid(row=11, column=1, columnspan=2, sticky="w", padx=2)
     # Nombre del contador
     ttk.Label(frm, text="Contador:").grid(row=0, column=0, sticky="e")
     combo_name = ttk.Combobox(frm, values=["LUZMERY", "MALINA", "VICTORIA"], width=18)
@@ -181,12 +159,12 @@ def main():
     entry_boxunittotal.insert(0, "0")
 
     # Magazijn y Winkel
-    ttk.Label(frm, text="Magazijn:").grid(row=9, column=0, sticky="e")
+    ttk.Label(frm, text="Sueltos:").grid(row=9, column=0, sticky="e")
     entry_mag = ttk.Entry(frm, width=8)
     entry_mag.grid(row=9, column=1, sticky="w")
     entry_mag.insert(0, "0")
 
-    ttk.Label(frm, text="Winkel:").grid(row=10, column=0, sticky="e")
+    ttk.Label(frm, text="Tienda:").grid(row=10, column=0, sticky="e")
     entry_win = ttk.Entry(frm, width=8)
     entry_win.grid(row=10, column=1, sticky="w")
     entry_win.insert(0, "0")
@@ -404,11 +382,12 @@ def main():
         boxunittotal = boxqty * boxunitqty
         total = boxunittotal + magazijn + winkel
         diff = total - actual
+        remark = entry_remark.get().strip()[:100]
         cur.execute("""
             INSERT INTO inventory_count
-            (counter_name, code_item, magazijn, winkel, total, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, stored_code, magazijn, winkel, total, actual, diff, selected_date.isoformat(), location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal))
+            (counter_name, code_item, magazijn, winkel, total, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal, remarks)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, stored_code, magazijn, winkel, total, actual, diff, selected_date.isoformat(), location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal, remark))
         conn.commit()
         conn.close()
         entry_code.delete(0, tk.END)
@@ -418,28 +397,11 @@ def main():
         entry_boxunittotal.config(state="normal"); entry_boxunittotal.delete(0, tk.END); entry_boxunittotal.insert(0, "0"); entry_boxunittotal.config(state="readonly")
         entry_mag.delete(0, tk.END); entry_mag.insert(0, "0")
         entry_win.delete(0, tk.END); entry_win.insert(0, "0")
+        entry_remark.delete(0, tk.END)
         lbl_location.config(text="")
         entry_code.focus_set()
         msg_guardado.set("Registro guardado")
         root.after(2000, lambda: msg_guardado.set(""))
-        # Reset campos
-        entry_code.delete(0, tk.END)
-        entry_boxqty.delete(0, tk.END); entry_boxqty.insert(0, "0")
-        entry_boxunitqty.delete(0, tk.END); entry_boxunitqty.insert(0, "0")
-        entry_boxunittotal.config(state="normal"); entry_boxunittotal.delete(0, tk.END); entry_boxunittotal.insert(0, "0"); entry_boxunittotal.config(state="readonly")
-        entry_mag.delete(0, tk.END)
-        entry_mag.insert(0, "0")
-        entry_win.delete(0, tk.END)
-        entry_win.insert(0, "0")
-        entry_desc.config(state="normal")
-        entry_desc.delete(0, tk.END)
-        entry_desc.config(state="readonly")
-        try:
-            lbl_location.config(text="")
-        except Exception:
-            pass
-        # No reiniciar la fecha de conteo, mantener la que el usuario colocó
-        entry_code.focus_set()
 
     def export_data():
         file_path = filedialog.asksaveasfilename(defaultextension=".xlsx",
