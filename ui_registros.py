@@ -6,6 +6,70 @@ from datetime import datetime
 
 DB_NAME = 'inventariovlm.db'
 
+
+class _Tooltip:
+    """Simple tooltip for tkinter widgets.
+
+    Usage: _Tooltip(widget, "text to show")
+    """
+    def __init__(self, widget, text: str):
+        self.widget = widget
+        self.text = text
+        self.tipwindow = None
+        self.id = None
+        self.x = self.y = 0
+        widget.bind("<Enter>", self.enter, add=True)
+        widget.bind("<Leave>", self.leave, add=True)
+        widget.bind("<Motion>", self.motion, add=True)
+
+    def enter(self, event=None):
+        self.schedule()
+
+    def leave(self, event=None):
+        self.unschedule()
+        self.hidetip()
+
+    def motion(self, event=None):
+        # update position for the tooltip
+        self.x = event.x_root + 10
+        self.y = event.y_root + 10
+
+    def schedule(self):
+        self.unschedule()
+        self.id = self.widget.after(500, self.showtip)
+
+    def unschedule(self):
+        id_ = self.id
+        self.id = None
+        if id_:
+            try:
+                self.widget.after_cancel(id_)
+            except Exception:
+                pass
+
+    def showtip(self):
+        if self.tipwindow or not self.text:
+            return
+        try:
+            self.tipwindow = tw = tk.Toplevel(self.widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{self.x}+{self.y}")
+            label = tk.Label(tw, text=self.text, justify=tk.LEFT,
+                             background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                             font=("tahoma", "8", "normal"))
+            label.pack(ipadx=4, ipady=2)
+        except Exception:
+            self.tipwindow = None
+
+    def hidetip(self):
+        tw = self.tipwindow
+        self.tipwindow = None
+        try:
+            if tw:
+                tw.destroy()
+        except Exception:
+            pass
+
 def mostrar_registros(root):
     # --- Lógica migrada desde app.py ---
     def cargar_datos(order_by="code_item", filter_code=None):
@@ -116,6 +180,28 @@ def mostrar_registros(root):
     edit_filter.grid(row=1, column=1, padx=2, pady=2)
     btn_filter.grid(row=1, column=2, padx=2, pady=2)
     btn_clear.grid(row=1, column=3, padx=2, pady=2)
+
+    # Tooltips: brief labels shown on hover for the edit fields
+    try:
+        _Tooltip(edit_counter, "Contador: nombre de la persona que contó")
+        _Tooltip(edit_code, "Código del ítem (use el formato del inventario)")
+        _Tooltip(edit_desc, "Descripción del producto (solo lectura)")
+        _Tooltip(edit_boxqty, "Cajas: cantidad de cajas contadas")
+        _Tooltip(edit_boxunitqty, "U/caja: unidades por caja")
+        _Tooltip(edit_boxunittotal, "Tot. U/cajas: cajas * U/caja (solo lectura)")
+        _Tooltip(edit_mag, "Magazijn: unidades sueltas en almacén")
+        _Tooltip(edit_win, "Winkel: unidades sueltas en tienda")
+        _Tooltip(edit_total, "Total: totales calculados (solo lectura)")
+        _Tooltip(edit_current, "Actual: inventario actual en la tabla items (solo lectura)")
+        _Tooltip(edit_diff, "Diferencia: total - actual (solo lectura)")
+        _Tooltip(edit_deposit, "Depósito: seleccionar depósito")
+        _Tooltip(edit_rack, "Rack: seleccionar rack dentro del depósito")
+        _Tooltip(edit_location, "Ubicación: depósito - rack (solo lectura)")
+        _Tooltip(edit_date, "Fecha del conteo (ISO o deje vacío para fecha actual)")
+        _Tooltip(edit_filter, "Escriba un código y presione Filtrar")
+    except Exception:
+        # Tooltips are best-effort; if anything goes wrong keep UI functional
+        pass
 
     # (Botones de acción creados más abajo, después de definir las funciones)
 
