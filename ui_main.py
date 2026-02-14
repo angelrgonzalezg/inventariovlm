@@ -64,6 +64,33 @@ def main():
                     if not respuesta:
                         # Si responde NO, saltar este registro
                         continue
+                # Compute location as "deposit_description - rack_description" when possible
+                dep_id = row.get('deposit_id', 0) or 0
+                rack_id = row.get('rack_id', 0) or 0
+                try:
+                    dep_desc = ''
+                    rack_desc = ''
+                    if dep_id:
+                        cur.execute("SELECT deposit_description FROM deposits WHERE deposit_id = ?", (dep_id,))
+                        drow = cur.fetchone()
+                        if drow and drow[0]:
+                            dep_desc = drow[0]
+                    if rack_id:
+                        cur.execute("SELECT rack_description FROM racks WHERE rack_id = ?", (rack_id,))
+                        rrow = cur.fetchone()
+                        if rrow and rrow[0]:
+                            rack_desc = rrow[0]
+                    if dep_desc and rack_desc:
+                        location = f"{dep_desc} - {rack_desc}"
+                    elif dep_desc:
+                        location = dep_desc
+                    elif rack_desc:
+                        location = rack_desc
+                    else:
+                        location = ''
+                except Exception:
+                    location = ''
+
                 cur.execute("""
                     INSERT INTO inventory_count
                     (counter_name, code_item, magazijn, winkel, total, remarks, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal)
@@ -79,7 +106,7 @@ def main():
                     0, # current_inventory (no viene en CSV)
                     row.get('total', 0), # difference (igual a total si no hay current_inventory)
                     row.get('count_date', datetime.now().date().isoformat()),
-                    '', # location (puedes mejorar si quieres)
+                    location,
                     row.get('deposit_id', 0),
                     row.get('rack_id', 0),
                     row.get('boxqty', 0),
