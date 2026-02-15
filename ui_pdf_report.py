@@ -479,7 +479,8 @@ def generate_pdf_report_verificacion(parent, db_path: str = DEFAULT_DB):
         ic.boxunittotal AS tot_uni_cajas,
         ic.magazijn AS sueltos,
         ic.total AS total,
-        ic.id
+        ic.id,
+        ic.remarks
     FROM inventory_count ic
     LEFT JOIN deposits d ON ic.deposit_id = d.deposit_id
     LEFT JOIN racks r ON ic.rack_id = r.rack_id
@@ -519,7 +520,7 @@ def generate_pdf_report_verificacion(parent, db_path: str = DEFAULT_DB):
     story.append(Paragraph("Reporte Verificación (orden por id)", title_style))
     story.append(Spacer(1, 8))
 
-    col_headers = ["Ubicación", "Código", "Producto", "Cajas", "U/caja", "Tot. U/cajas", "Sueltos", "Total", "ID"]
+    col_headers = ["Ubicación", "Código", "Producto", "Cajas", "U/caja", "Tot. U/cajas", "Sueltos", "Total", "ID", "Comentarios"]
     for ci, (counter_name, depositos) in enumerate(grouped.items()):
         story.append(Paragraph(f"Contador: {counter_name}", contador_style))
         story.append(Spacer(1, 6))
@@ -540,9 +541,10 @@ def generate_pdf_report_verificacion(parent, db_path: str = DEFAULT_DB):
                         str(r[8] or 0),
                         str(r[9] or 0),
                         str(r[10] or 0),
-                        str(r[11] or "")
+                        str(r[11] or ""),
+                        (r[12] or "")[:120]
                     ])
-                table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[90, 60, 140, 35, 40, 45, 45, 45, 30])
+                table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[90, 60, 140, 35, 40, 45, 45, 45, 30, 120])
                 tbl_style = TableStyle([
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d3d3d3")),
                     ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
@@ -818,17 +820,18 @@ def generate_pdf_report_verificacion(parent, db_path=DEFAULT_DB):
         r.rack_description AS rack,
         ic.location AS ubicacion,
         ic.code_item AS producto_codigo,
-        i.description_item AS producto,
+        COALESCE(i.description_item, '') AS producto,
         ic.boxqty AS cajas,
         ic.boxunitqty AS uni_x_cajas,
         ic.boxunittotal AS tot_uni_cajas,
         ic.magazijn AS sueltos,
         ic.total AS total,
-        ic.id
+        ic.id,
+        ic.remarks
     FROM inventory_count ic
-    INNER JOIN deposits d ON ic.deposit_id = d.deposit_id
-    INNER JOIN racks r ON ic.rack_id = r.rack_id
-    INNER JOIN items i on ic.code_item = i.code_item
+    LEFT JOIN deposits d ON ic.deposit_id = d.deposit_id
+    LEFT JOIN racks r ON ic.rack_id = r.rack_id
+    LEFT JOIN items i on ic.code_item = i.code_item
     ORDER BY ic.counter_name ASC, d.deposit_description ASC, r.rack_description ASC, ic.id ASC;
     '''
     try:
@@ -861,7 +864,7 @@ def generate_pdf_report_verificacion(parent, db_path=DEFAULT_DB):
     story = []
     story.append(Paragraph("Reporte Verificación (orden por id)", title_style))
     story.append(Spacer(1, 8))
-    col_headers = ["Ubicación", "Código", "Producto", "Cajas", "U/caja", "Tot. U/cajas", "Sueltos", "Total", "ID"]
+    col_headers = ["Ubicación", "Código", "Producto", "Cajas", "U/caja", "Tot. U/cajas", "Sueltos", "Total", "ID", "Comentarios"]
     for ci, (counter_name, depositos) in enumerate(grouped.items()):
         story.append(Paragraph(f"Contador: {counter_name}", contador_style))
         story.append(Spacer(1, 6))
@@ -873,7 +876,7 @@ def generate_pdf_report_verificacion(parent, db_path=DEFAULT_DB):
                 story.append(Spacer(1, 4))
                 data = [col_headers]
                 for r in items:
-                    # r contains fields as selected above, with id at the end
+                    # r contains fields as selected above, with remarks at the end
                     data.append([
                         r[3] or "",
                         r[4] or "",
@@ -883,9 +886,10 @@ def generate_pdf_report_verificacion(parent, db_path=DEFAULT_DB):
                         str(r[8] or 0),
                         str(r[9] or 0),
                         str(r[10] or 0),
-                        str(r[11] or "")
+                        str(r[11] or ""),
+                        (r[12] or "")[:120]
                     ])
-                table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[90, 60, 140, 35, 40, 45, 45, 45, 30])
+                table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[90, 60, 140, 35, 40, 45, 45, 45, 30, 120])
                 tbl_style = TableStyle([
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d3d3d3")),
                     ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),

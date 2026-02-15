@@ -260,6 +260,95 @@ def main():
     btn_import.grid(row=21, column=0, pady=8)
     btn_buscar = ttk.Button(frm, text="Buscar", command=lambda: buscar_item())
     btn_buscar.grid(row=21, column=1, pady=8)
+    # Botón para actualizar 'current_inventory' en la tabla 'items' desde un CSV
+    def actualizar_current_inventory_from_csv(file_path=None):
+        # Prompt for file if not provided
+        if not file_path:
+            file_path = filedialog.askopenfilename(title="Selecciona CSV para actualizar current_inventory",
+                                                   filetypes=[("CSV Files", "*.csv"), ("All files", "*")],
+                                                   parent=root)
+            if not file_path:
+                return
+        if not os.path.exists(file_path):
+            messagebox.showerror("Error", f"No se encontró el archivo: {file_path}", parent=root)
+            return
+        try:
+            df = pd.read_csv(file_path, dtype=str, keep_default_na=False)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo leer el CSV: {e}", parent=root)
+            return
+        # Normalize column name variations
+        col_map = {"code": "code_item", "codigo": "code_item", "number": "code_item", "current": "current_inventory", "inventory": "current_inventory"}
+        df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+        if "code_item" not in df.columns and "code" not in df.columns:
+            messagebox.showerror("Error", "El CSV debe contener la columna 'code_item' (o 'code'/'number')", parent=root)
+            return
+        if "current_inventory" not in df.columns:
+            messagebox.showerror("Error", "El CSV debe contener la columna 'current_inventory' (o 'current'/'inventory')", parent=root)
+            return
+        # Clean and convert
+        df["code_item"] = df["code_item"].astype(str).str.strip()
+        df["current_inventory"] = pd.to_numeric(df["current_inventory"].replace("", "0"), errors="coerce").fillna(0).astype(int)
+
+        # Ensure backups directory exists and back up 'items' table before changes
+        backup_dir = os.path.join(os.getcwd(), "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        conn = sqlite3.connect(DB_NAME)
+        try:
+            try:
+                df_items_backup = pd.read_sql_query("SELECT * FROM items", conn)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_path = os.path.join(backup_dir, f"items_backup_{ts}.csv")
+                df_items_backup.to_csv(backup_path, index=False)
+            except Exception:
+                # If backup fails, continue but warn in console
+                print("Advertencia: no se pudo crear respaldo de 'items' antes de la actualización")
+
+            cur = conn.cursor()
+            updated = 0
+            not_found = []
+            for _, row in df.iterrows():
+                code = str(row["code_item"]).strip()
+                val = int(row["current_inventory"])
+                cur.execute("SELECT 1 FROM items WHERE code_item = ?", (code,))
+                if cur.fetchone():
+                    cur.execute("UPDATE items SET current_inventory = ? WHERE code_item = ?", (val, code))
+                    updated += 1
+                    continue
+                alt = code.lstrip("0")
+                if alt:
+                    cur.execute("SELECT 1 FROM items WHERE code_item = ?", (alt,))
+                    if cur.fetchone():
+                        cur.execute("UPDATE items SET current_inventory = ? WHERE code_item = ?", (val, alt))
+                        updated += 1
+                        continue
+                not_found.append(code)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            messagebox.showerror("Error", f"Error al actualizar la base de datos: {e}", parent=root)
+            conn.close()
+            return
+        conn.close()
+
+        # Save not_found list to backups for review
+        ts2 = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if not_found:
+            nf_path = os.path.join(backup_dir, f"not_found_current_inventory_{ts2}.txt")
+            try:
+                with open(nf_path, "w", encoding="utf-8") as f:
+                    for c in not_found:
+                        f.write(f"{c}\n")
+            except Exception:
+                print("Advertencia: no se pudo escribir la lista de códigos no encontrados en backups")
+
+        summary = f"Registros actualizados: {updated}"
+        if not_found:
+            summary += f"\nCódigos no encontrados: {len(not_found)} (guardados en {nf_path})"
+        messagebox.showinfo("Actualización completada", summary, parent=root)
+
+    btn_update_current = ttk.Button(frm, text="Actualizar current_inventory (CSV)", command=lambda: actualizar_current_inventory_from_csv())
+    btn_update_current.grid(row=21, column=2, pady=8)
     msg_guardado = tk.StringVar()
     lbl_guardado = ttk.Label(frm, textvariable=msg_guardado, foreground="green")
     lbl_guardado.grid(row=20, column=2, padx=8, sticky="w")
