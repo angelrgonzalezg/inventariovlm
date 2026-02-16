@@ -356,7 +356,7 @@ def main():
     btn_registros.grid(row=22, column=1, pady=8)
 
     # Botón para generar reporte PDF (usa ui_pdf_report.add_pdf_report_button)
-    from ui_pdf_report import add_pdf_report_button, add_pdf_report_por_deposito_button, add_pdf_report_por_contador_button
+    from ui_pdf_report import add_pdf_report_button, add_pdf_report_por_deposito_button, add_pdf_report_por_contador_button, add_pdf_report_diferencias_button
     btn_pdf = add_pdf_report_button(frm, db_path=DB_NAME, button_text="Generar PDF")
     try:
         btn_pdf.grid(row=22, column=2, pady=8)
@@ -387,6 +387,17 @@ def main():
             pass
     except Exception:
         # if import fails, ignore
+        pass
+
+    # Botón reporte de diferencias (por item y ubicación)
+    try:
+        from ui_pdf_report import add_pdf_report_diferencias_button
+        btn_pdf_diff = add_pdf_report_diferencias_button(frm, db_path=DB_NAME, button_text="Reporte Diferencias")
+        try:
+            btn_pdf_diff.grid(row=26, column=2, pady=8)
+        except Exception:
+            pass
+    except Exception:
         pass
 
     # --- Callbacks principales (adaptados) ---

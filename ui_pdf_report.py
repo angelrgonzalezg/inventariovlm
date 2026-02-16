@@ -106,6 +106,10 @@ def add_pdf_report_verificacion_button(parent_frame, db_path: str = DEFAULT_DB, 
     return _make_button(parent_frame, row=26, text=button_text, command=lambda: generate_pdf_report_verificacion(parent_frame, db_path))
 
 
+def add_pdf_report_diferencias_button(parent_frame, db_path: str = DEFAULT_DB, button_text: str = "Reporte Diferencias"):
+    return _make_button(parent_frame, row=27, text=button_text, command=lambda: generate_pdf_report_diferencias(parent_frame, db_path))
+
+
 # ----------------- Report generators -----------------
 
 
@@ -792,6 +796,106 @@ def generate_pdf_report(parent, db_path=DEFAULT_DB):
 
     _open_pdf_file(file_path, parent=parent)
     messagebox.showinfo("OK", f"Reporte PDF generado: {file_path}")
+
+
+def generate_pdf_report_diferencias(parent, db_path: str = DEFAULT_DB):
+    """Genera un reporte con las diferencias por item y ubicación.
+
+    Usa la consulta proporcionada por el usuario, agrupando por `ic.code_item, ic.location`.
+    """
+    file_path = _asksave(parent)
+    if not file_path:
+        return
+    if not _ensure_reportlab(parent):
+        return
+    if not os.path.exists(db_path):
+        messagebox.showerror("Error", f"No se encontró la base de datos: {db_path}", parent=parent)
+        return
+
+    sql = '''
+    select ic.code_item item,
+           ic.location ubicacion, 
+           max(i.description_item) item_descripcion, 
+           sum(ic.boxunittotal) en_cajas, 
+           sum(ic.magazijn) sueltos, 
+           sum(ic.total) total, 
+           max(i.current_inventory) inventario_actual,
+           SUM(ic.total) - MAX(i.current_inventory) AS diferencia
+      from inventory_count ic
+      left join items i on i.code_item = ic.code_item
+      left join racks r on r.rack_id = ic.rack_id
+      left join deposits d on d.deposit_id = ic.deposit_id
+     group by ic.code_item, ic.location
+     ORDER BY ic.code_item ASC, ic.location ASC
+    '''
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(sql)
+        rows = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al leer la base de datos: {e}", parent=parent)
+        return
+
+    # Build PDF
+    try:
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    except Exception:
+        messagebox.showerror("Error", "No se encontró 'reportlab'. Instala reportlab (ej: pip install reportlab).", parent=parent)
+        return
+
+    styles = getSampleStyleSheet()
+    title_style = styles["Heading1"]
+    normal = styles["Normal"]
+
+    doc = SimpleDocTemplate(file_path, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+    story = []
+    story.append(Paragraph("Reporte de Diferencias por Item y Ubicación", title_style))
+    story.append(Spacer(1, 8))
+
+    col_headers = ["Código", "Ubicación", "Descripción", "En Cajas", "Sueltos", "Total", "Inventario Actual", "Diferencia"]
+    data = [col_headers]
+    for r in rows:
+        # r corresponds to select order: item, ubicacion, item_descripcion, en_cajas, sueltos, total, inventario_actual, diferencia
+        data.append([
+            r[0] or "",
+            r[1] or "",
+            (r[2] or "")[:80],
+            str(r[3] or 0),
+            str(r[4] or 0),
+            str(r[5] or 0),
+            str(r[6] or 0),
+            str(r[7] or 0),
+        ])
+
+    # Table column widths tuned for landscape A4
+    colWidths = [70, 120, 240, 50, 50, 60, 70, 60]
+    table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=colWidths)
+    tbl_style = TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d3d3d3")),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ])
+    table.setStyle(tbl_style)
+    story.append(table)
+
+    try:
+        doc.build(story)
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al generar el PDF: {e}", parent=parent)
+        return
+
+    _open_pdf_file(file_path, parent=parent)
+    messagebox.showinfo("OK", f"Reporte PDF generado: {file_path}", parent=parent)
 
 
 def generate_pdf_report_verificacion(parent, db_path=DEFAULT_DB):

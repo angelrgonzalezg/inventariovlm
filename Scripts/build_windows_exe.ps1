@@ -7,8 +7,8 @@ param(
     [string]$entryScript = "app.py",
     [string]$exeName = "InventarioVLM",
     [string]$distDir = "dist",
-    [string]$specExtra = ""
-     [switch]$DebugBuild
+    [string]$specExtra = "",
+    [switch]$DebugBuild
 )
 
 $ErrorActionPreference = 'Stop'
