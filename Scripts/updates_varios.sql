@@ -1,0 +1,7 @@
+UPDATE inventory_count set count_date='2026-01-26' where location = 'Deposit N1 - B9'
+
+UPDATE inventory_count set counter_name='Luzmery' where location = 'Deposit N1 - B9'
+
+UPDATE inventory_count set counter_name='LUZMERY' where location = 'Deposit N1 - B7'
+
+UPDATE racks set rack_description=rack_code

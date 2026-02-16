@@ -110,6 +110,14 @@ def add_pdf_report_diferencias_button(parent_frame, db_path: str = DEFAULT_DB, b
     return _make_button(parent_frame, row=27, text=button_text, command=lambda: generate_pdf_report_diferencias(parent_frame, db_path))
 
 
+def add_pdf_report_diferencias_por_item_button(parent_frame, db_path: str = DEFAULT_DB, button_text: str = "Diferencias por Item"):
+    return _make_button(parent_frame, row=28, text=button_text, command=lambda: generate_pdf_report_diferencias_por_item(parent_frame, db_path))
+
+
+def add_pdf_report_diferencias_threshold_button(parent_frame, db_path: str = DEFAULT_DB, button_text: str = "Diferencias > X"):
+    return _make_button(parent_frame, row=29, text=button_text, command=lambda: generate_pdf_report_diferencias_threshold(parent_frame, db_path))
+
+
 # ----------------- Report generators -----------------
 
 
@@ -1017,3 +1025,200 @@ def generate_pdf_report_verificacion(parent, db_path=DEFAULT_DB):
         return
     _open_pdf_file(file_path, parent=parent)
     messagebox.showinfo("OK", f"Reporte PDF generado: {file_path}")
+
+
+def generate_pdf_report_diferencias_por_item(parent, db_path: str = DEFAULT_DB):
+    """Generate a PDF that aggregates differences grouped by `code_item`.
+
+    The report contains one row per item with summed `total`, `current_inventory` and `difference`.
+    """
+    file_path = _asksave(parent)
+    if not file_path:
+        return
+    if not _ensure_reportlab(parent):
+        return
+    if not os.path.exists(db_path):
+        messagebox.showerror("Error", f"No se encontró la base de datos: {db_path}", parent=parent)
+        return
+
+    sql = """
+    SELECT ic.code_item AS item,
+           MAX(i.description_item) AS item_descripcion,
+           SUM(ic.boxunittotal) AS en_cajas,
+           SUM(ic.magazijn) AS sueltos,
+           SUM(ic.total) AS total,
+           MAX(i.current_inventory) AS inventario_actual,
+           SUM(ic.total) - MAX(i.current_inventory) AS diferencia
+      FROM inventory_count ic
+      LEFT JOIN items i ON i.code_item = ic.code_item
+     GROUP BY ic.code_item
+     ORDER BY ic.code_item ASC;
+    """
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(sql)
+        rows = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al leer la base de datos: {e}", parent=parent)
+        return
+
+    # lazy imports
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    styles = getSampleStyleSheet()
+    title_style = styles["Heading1"]
+    normal = styles["Normal"]
+
+    doc = SimpleDocTemplate(file_path, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+    story = []
+    story.append(Paragraph("Reporte de Diferencias por Item", title_style))
+    story.append(Spacer(1, 8))
+
+    col_headers = ["Código", "Descripción", "En Cajas", "Sueltos", "Total", "Actual", "Diferencia"]
+    data = [col_headers]
+    for r in rows:
+        data.append([
+            r[0] or "",
+            (r[1] or "")[:140],
+            str(r[2] or 0),
+            str(r[3] or 0),
+            str(r[4] or 0),
+            str(r[5] or 0),
+            str(r[6] or 0)
+        ])
+
+    if len(data) == 1:
+        story.append(Paragraph("No hay registros para reportar.", normal))
+    else:
+        table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[70, 300, 60, 60, 60, 60, 60])
+        tbl_style = TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d3d3d3")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ])
+        table.setStyle(tbl_style)
+        story.append(table)
+
+    try:
+        doc.build(story)
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al generar el PDF: {e}", parent=parent)
+        return
+
+    _open_pdf_file(file_path, parent=parent)
+    messagebox.showinfo("OK", f"Reporte PDF generado: {file_path}", parent=parent)
+
+
+def generate_pdf_report_diferencias_threshold(parent, db_path: str = DEFAULT_DB):
+    """Prompt for a threshold and generate a PDF with items whose absolute difference
+    (SUM(total) - MAX(current_inventory)) is greater than the given threshold.
+    """
+    try:
+        from tkinter import simpledialog
+    except Exception:
+        simpledialog = None
+
+    if simpledialog is None:
+        messagebox.showerror("Error", "No se puede pedir el parámetro al usuario (simpledialog no disponible).", parent=parent)
+        return
+
+    thr = simpledialog.askinteger("Umbral", "Mostrar diferencias con valor absoluto mayor que:", parent=parent, minvalue=0)
+    if thr is None:
+        return
+
+    file_path = _asksave(parent)
+    if not file_path:
+        return
+    if not _ensure_reportlab(parent):
+        return
+    if not os.path.exists(db_path):
+        messagebox.showerror("Error", f"No se encontró la base de datos: {db_path}", parent=parent)
+        return
+
+    sql = """
+    SELECT ic.code_item AS item,
+           MAX(i.description_item) AS item_descripcion,
+           SUM(ic.boxunittotal) AS en_cajas,
+           SUM(ic.magazijn) AS sueltos,
+           SUM(ic.total) AS total,
+           MAX(i.current_inventory) AS inventario_actual,
+           SUM(ic.total) - MAX(i.current_inventory) AS diferencia
+      FROM inventory_count ic
+      LEFT JOIN items i ON i.code_item = ic.code_item
+     GROUP BY ic.code_item
+    HAVING ABS(SUM(ic.total) - MAX(i.current_inventory)) > ?
+    ORDER BY ABS(SUM(ic.total) - MAX(i.current_inventory)) DESC, ic.code_item ASC;
+    """
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(sql, (thr,))
+        rows = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al leer la base de datos: {e}", parent=parent)
+        return
+
+    # lazy imports
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    styles = getSampleStyleSheet()
+    title_style = styles["Heading1"]
+    normal = styles["Normal"]
+
+    doc = SimpleDocTemplate(file_path, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+    story = []
+    story.append(Paragraph(f"Reporte de Diferencias por Item (|diferencia| > {thr})", title_style))
+    story.append(Spacer(1, 8))
+
+    col_headers = ["Código", "Descripción", "En Cajas", "Sueltos", "Total", "Actual", "Diferencia"]
+    data = [col_headers]
+    for r in rows:
+        data.append([
+            r[0] or "",
+            (r[1] or "")[:140],
+            str(r[2] or 0),
+            str(r[3] or 0),
+            str(r[4] or 0),
+            str(r[5] or 0),
+            str(r[6] or 0)
+        ])
+
+    if len(data) == 1:
+        story.append(Paragraph("No hay registros que cumplan el umbral especificado.", normal))
+    else:
+        table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[70, 300, 60, 60, 60, 60, 60])
+        tbl_style = TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d3d3d3")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ])
+        table.setStyle(tbl_style)
+        story.append(table)
+
+    try:
+        doc.build(story)
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al generar el PDF: {e}", parent=parent)
+        return
+
+    _open_pdf_file(file_path, parent=parent)
+    messagebox.showinfo("OK", f"Reporte PDF generado: {file_path}", parent=parent)

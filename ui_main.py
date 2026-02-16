@@ -8,7 +8,18 @@ from datetime import datetime
 import sys
 import os
 import sqlite3
-DB_NAME = 'inventariovlm.db'
+import sys
+import os
+
+# Resolve database path so the frozen executable finds the DB next to the exe.
+if getattr(sys, "frozen", False):
+    # Running in a PyInstaller bundle
+    _base_dir = os.path.dirname(sys.executable)
+else:
+    # Running in normal Python environment
+    _base_dir = os.path.dirname(os.path.abspath(__file__))
+
+DB_NAME = os.path.join(_base_dir, 'inventariovlm.db')
 def main():
 
     def importar_inventory():
@@ -42,81 +53,436 @@ def main():
         for col in ['boxqty', 'boxunitqty', 'boxunittotal', 'magazijn', 'winkel', 'total', 'deposit_id', 'rack_id']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col].replace('', 0), errors='coerce').fillna(0).astype(int)
-        # Formatear fecha a ISO
-        if 'count_date' in df.columns:
-            df['count_date'] = df['count_date'].apply(lambda d: datetime.strptime(d, '%d-%m-%Y').date().isoformat() if d else datetime.now().date().isoformat())
-            # Insertar en la base de datos
-            conn = sqlite3.connect(DB_NAME)
-            cur = conn.cursor()
-            insertados = 0
-            for _, row in df.iterrows():
-                cur.execute("SELECT * FROM inventory_count WHERE code_item = ? ORDER BY count_date, counter_name, deposit_id, rack_id", (row['code_item'],))
-                existing = cur.fetchall()
-                if existing:
-                    # Mostrar los registros existentes en un diálogo, ordenados
-                    info = '\n'.join([
-                        f"FECHA: {r[8]}, CONTADOR: {r[1]}, DEPÓSITO: {r[10]}, RACK: {r[11]}, TOTAL: {r[5]}" for r in existing
-                    ])
-                    respuesta = messagebox.askyesno(
-                        "Registro existente",
-                        f"Ya existe(n) registro(s) con CODE_ITEM '{row['code_item']}':\n\n{info}\n\n¿Deseas agregar el nuevo registro igualmente?"
-                    )
-                    if not respuesta:
-                        # Si responde NO, saltar este registro
-                        continue
-                # Compute location as "deposit_description - rack_description" when possible
-                dep_id = row.get('deposit_id', 0) or 0
-                rack_id = row.get('rack_id', 0) or 0
-                try:
-                    dep_desc = ''
-                    rack_desc = ''
-                    if dep_id:
-                        cur.execute("SELECT deposit_description FROM deposits WHERE deposit_id = ?", (dep_id,))
-                        drow = cur.fetchone()
-                        if drow and drow[0]:
-                            dep_desc = drow[0]
-                    if rack_id:
-                        cur.execute("SELECT rack_description FROM racks WHERE rack_id = ?", (rack_id,))
-                        rrow = cur.fetchone()
-                        if rrow and rrow[0]:
-                            rack_desc = rrow[0]
-                    if dep_desc and rack_desc:
-                        location = f"{dep_desc} - {rack_desc}"
-                    elif dep_desc:
-                        location = dep_desc
-                    elif rack_desc:
-                        location = rack_desc
-                    else:
-                        location = ''
-                except Exception:
-                    location = ''
 
-                cur.execute("""
-                    INSERT INTO inventory_count
+        # Formatear fecha a ISO (intenta varios formatos; usa hoy si no puede parsear)
+        if 'count_date' in df.columns:
+            df['count_date'] = pd.to_datetime(df['count_date'], dayfirst=True, errors='coerce').dt.date
+            df['count_date'] = df['count_date'].apply(lambda d: d.isoformat() if pd.notna(d) else datetime.now().date().isoformat())
+        else:
+            df['count_date'] = datetime.now().date().isoformat()
+
+        # Insertar en la base de datos
+        conn = sqlite3.connect(DB_NAME)
+        cur = conn.cursor()
+        insertados = 0
+        failures = []
+        # helper: resolve deposit and rack values
+        def resolve_deposit(value):
+            """Return (deposit_id, deposit_description) or (None, None) if not found."""
+            if value is None or (isinstance(value, str) and value.strip() == ""):
+                return (None, None)
+            # try numeric id
+            try:
+                vid = int(str(value))
+                cur.execute("SELECT deposit_id, deposit_description FROM deposits WHERE deposit_id = ?", (vid,))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            # try by description (case-insensitive)
+            try:
+                cur.execute("SELECT deposit_id, deposit_description FROM deposits WHERE lower(deposit_description)=lower(?)", (str(value).strip(),))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            # try partial match
+            try:
+                cur.execute("SELECT deposit_id, deposit_description FROM deposits WHERE deposit_description LIKE ?", (f"%{str(value).strip()}%",))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            return (None, None)
+
+        def resolve_rack(value, deposit_id=None):
+            """Return (rack_id, rack_description) or (None, None) if not found."""
+            if value is None or (isinstance(value, str) and value.strip() == ""):
+                return (None, None)
+            # try numeric id
+            try:
+                vid = int(str(value))
+                cur.execute("SELECT rack_id, rack_description FROM racks WHERE rack_id = ?", (vid,))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            # try by description with deposit context
+            try:
+                if deposit_id:
+                    cur.execute("SELECT rack_id, rack_description FROM racks WHERE deposit_id = ? AND lower(rack_description)=lower(?)", (deposit_id, str(value).strip()))
+                    r = cur.fetchone()
+                    if r:
+                        return (r[0], r[1] or '')
+                cur.execute("SELECT rack_id, rack_description FROM racks WHERE lower(rack_description)=lower(?)", (str(value).strip(),))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            # try partial match
+            try:
+                cur.execute("SELECT rack_id, rack_description FROM racks WHERE rack_description LIKE ?", (f"%{str(value).strip()}%",))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            return (None, None)
+
+        for idx, row in df.iterrows():
+                # Always insert new records even if duplicates exist (allow multiple records)
+                # Previous behavior prompted the user when a code_item already existed; that prompt
+                # was removed per request so imports do not block for user input.
+                # Resolve deposit and rack values from CSV fields; accept deposit_id/ deposit / deposit_description
+                raw_dep = None
+                raw_rack = None
+                for key in ('deposit_id', 'deposit', 'deposit_description', 'deposito'):
+                    if key in df.columns and row.get(key, '') not in (None, ''):
+                        raw_dep = row.get(key)
+                        break
+                for key in ('rack_id', 'rack', 'rack_description'):
+                    if key in df.columns and row.get(key, '') not in (None, ''):
+                        raw_rack = row.get(key)
+                        break
+
+                dep_id_resolved = None
+                dep_desc_resolved = ''
+                if raw_dep is not None:
+                    dep_id_resolved, dep_desc_resolved = resolve_deposit(raw_dep)
+                    if dep_id_resolved is None:
+                        # cannot resolve deposit -> treat as failure
+                        try:
+                            row_dict = row.to_dict()
+                        except Exception:
+                            row_dict = {"code_item": row.get('code_item', '')}
+                        row_dict['_error'] = f"Deposit not found: {raw_dep}"
+                        row_dict['_row_index'] = int(idx) if idx is not None else None
+                        failures.append(row_dict)
+                        continue
+
+                rack_id_resolved = None
+                rack_desc_resolved = ''
+                if raw_rack is not None:
+                    rack_id_resolved, rack_desc_resolved = resolve_rack(raw_rack, dep_id_resolved)
+                    if rack_id_resolved is None:
+                        try:
+                            row_dict = row.to_dict()
+                        except Exception:
+                            row_dict = {"code_item": row.get('code_item', '')}
+                        row_dict['_error'] = f"Rack not found: {raw_rack}"
+                        row_dict['_row_index'] = int(idx) if idx is not None else None
+                        failures.append(row_dict)
+                        continue
+
+                # Compute location
+                location = ''
+                if dep_desc_resolved and rack_desc_resolved:
+                    location = f"{dep_desc_resolved} - {rack_desc_resolved}"
+                elif dep_desc_resolved:
+                    location = dep_desc_resolved
+                elif rack_desc_resolved:
+                    location = rack_desc_resolved
+
+                # Prepare values for insert: prefer explicit deposit_id/rack_id columns if provided and resolved, else 0
+                deposit_id_val = dep_id_resolved or 0
+                rack_id_val = rack_id_resolved or 0
+
+                # Try to insert row; on error record failure and continue
+                try:
+                    cur.execute("""
+                        INSERT INTO inventory_count
+                        (counter_name, code_item, magazijn, winkel, total, remarks, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row.get('counter_name', ''),
+                        row.get('code_item', ''),
+                        row.get('magazijn', 0),
+                        row.get('winkel', 0),
+                        row.get('total', 0),
+                        row.get('remarks', ''),
+                        row.get('current_inventory', 0) if 'current_inventory' in df.columns else 0,
+                        row.get('difference', row.get('total', 0)),
+                        row.get('count_date', datetime.now().date().isoformat()),
+                        location,
+                        deposit_id_val,
+                        rack_id_val,
+                        row.get('boxqty', 0),
+                        row.get('boxunitqty', 0),
+                        row.get('boxunittotal', 0)
+                    ))
+                    insertados += 1
+                except Exception as e:
+                    # Record failure: include original row data and error message
+                    try:
+                        row_dict = row.to_dict()
+                    except Exception:
+                        row_dict = {"code_item": row.get('code_item', '' )}
+                    row_dict['_error'] = str(e)
+                    row_dict['_row_index'] = int(idx) if idx is not None else None
+                    failures.append(row_dict)
+                    # continue with next row
+                    continue
+        conn.commit()
+        conn.close()
+
+        # If there were failures, write them to a CSV log in backups/
+        if failures:
+            backup_dir = os.path.join(os.getcwd(), 'backups')
+            os.makedirs(backup_dir, exist_ok=True)
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            fail_path = os.path.join(backup_dir, f"import_errors_{ts}.csv")
+            try:
+                import csv as _csv
+                # Write header as union of keys
+                keys = set()
+                for r in failures:
+                    keys.update(r.keys())
+                keys = list(keys)
+                with open(fail_path, 'w', encoding='utf-8', newline='') as fh:
+                    writer = _csv.DictWriter(fh, fieldnames=keys)
+                    writer.writeheader()
+                    for r in failures:
+                        writer.writerow(r)
+            except Exception as e:
+                print(f"No se pudo escribir el log de importación: {e}")
+
+        msg = f"Importación completada. Registros insertados: {insertados}."
+        if failures:
+            msg += f" Fallos: {len(failures)}. Log: {fail_path}"
+        messagebox.showinfo("Importación completada", msg)
+
+    def importar_consolidado_csv():
+        """Import a CSV with the same structure and insert all rows into `consolidado_csv`.
+
+        This importer will not check whether the `code_item` exists in `items`.
+        It will attempt to resolve deposit/rack descriptions to ids (best-effort);
+        if they cannot be resolved the row is still inserted with deposit_id=0, rack_id=0 and empty location.
+        """
+        file_path = filedialog.askopenfilename(
+            title="Selecciona archivo consolidado",
+            filetypes=[("CSV Files", "*.csv"), ("Todos los archivos", "*.*")]
+        )
+        if not file_path:
+            return
+        if not os.path.exists(file_path):
+            messagebox.showerror("Error", f"No se encontró el archivo: {file_path}")
+            return
+        df = pd.read_csv(file_path, dtype=str, keep_default_na=False)
+        # Normalize column names (same mapping as the main importer)
+        df = df.rename(columns={
+            'codeitem': 'code_item',
+            'remark': 'remarks',
+            'remarks': 'remarks',
+            'boxqty': 'boxqty',
+            'boxunitqty': 'boxunitqty',
+            'boxunittotal': 'boxunittotal',
+            'magazijn': 'magazijn',
+            'winkel': 'winkel',
+            'total': 'total',
+            'counter_name': 'counter_name',
+            'deposit_id': 'deposit_id',
+            'rack_id': 'rack_id',
+            'count_date': 'count_date',
+        })
+        for col in ['boxqty', 'boxunitqty', 'boxunittotal', 'magazijn', 'winkel', 'total', 'deposit_id', 'rack_id']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col].replace('', 0), errors='coerce').fillna(0).astype(int)
+
+        if 'count_date' in df.columns:
+            df['count_date'] = pd.to_datetime(df['count_date'], dayfirst=True, errors='coerce').dt.date
+            df['count_date'] = df['count_date'].apply(lambda d: d.isoformat() if pd.notna(d) else datetime.now().date().isoformat())
+        else:
+            df['count_date'] = datetime.now().date().isoformat()
+
+        conn = sqlite3.connect(DB_NAME)
+        cur = conn.cursor()
+        # Ensure consolidado_csv table exists (basic schema similar to inventory_count)
+        try:
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS consolidado_csv (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    counter_name TEXT,
+                    code_item TEXT,
+                    magazijn INTEGER,
+                    winkel INTEGER,
+                    total INTEGER,
+                    remarks TEXT,
+                    current_inventory INTEGER,
+                    difference INTEGER,
+                    count_date TEXT,
+                    location TEXT,
+                    deposit_id INTEGER,
+                    rack_id INTEGER,
+                    boxqty INTEGER,
+                    boxunitqty INTEGER,
+                    boxunittotal INTEGER
+                )
+            ''')
+        except Exception:
+            # ignore if creation fails for some reason
+            pass
+
+        insertados = 0
+        failures = []
+
+        def resolve_deposit(value):
+            if value is None or (isinstance(value, str) and value.strip() == ""):
+                return (None, None)
+            try:
+                vid = int(str(value))
+                cur.execute("SELECT deposit_id, deposit_description FROM deposits WHERE deposit_id = ?", (vid,))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            try:
+                cur.execute("SELECT deposit_id, deposit_description FROM deposits WHERE lower(deposit_description)=lower(?)", (str(value).strip(),))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            try:
+                cur.execute("SELECT deposit_id, deposit_description FROM deposits WHERE deposit_description LIKE ?", (f"%{str(value).strip()}%",))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            return (None, None)
+
+        def resolve_rack(value, deposit_id=None):
+            if value is None or (isinstance(value, str) and value.strip() == ""):
+                return (None, None)
+            try:
+                vid = int(str(value))
+                cur.execute("SELECT rack_id, rack_description FROM racks WHERE rack_id = ?", (vid,))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            try:
+                if deposit_id:
+                    cur.execute("SELECT rack_id, rack_description FROM racks WHERE deposit_id = ? AND lower(rack_description)=lower(?)", (deposit_id, str(value).strip()))
+                    r = cur.fetchone()
+                    if r:
+                        return (r[0], r[1] or '')
+                cur.execute("SELECT rack_id, rack_description FROM racks WHERE lower(rack_description)=lower(?)", (str(value).strip(),))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            try:
+                cur.execute("SELECT rack_id, rack_description FROM racks WHERE rack_description LIKE ?", (f"%{str(value).strip()}%",))
+                r = cur.fetchone()
+                if r:
+                    return (r[0], r[1] or '')
+            except Exception:
+                pass
+            return (None, None)
+
+        for idx, row in df.iterrows():
+            # Resolve deposit/rack if present, but do not abort on failure; insert anyway with defaults
+            raw_dep = None
+            raw_rack = None
+            for key in ('deposit_id', 'deposit', 'deposit_description', 'deposito'):
+                if key in df.columns and row.get(key, '') not in (None, ''):
+                    raw_dep = row.get(key)
+                    break
+            for key in ('rack_id', 'rack', 'rack_description'):
+                if key in df.columns and row.get(key, '') not in (None, ''):
+                    raw_rack = row.get(key)
+                    break
+
+            dep_id_resolved = None
+            dep_desc_resolved = ''
+            if raw_dep is not None:
+                dep_id_resolved, dep_desc_resolved = resolve_deposit(raw_dep)
+
+            rack_id_resolved = None
+            rack_desc_resolved = ''
+            if raw_rack is not None:
+                rack_id_resolved, rack_desc_resolved = resolve_rack(raw_rack, dep_id_resolved)
+
+            location = ''
+            if dep_desc_resolved and rack_desc_resolved:
+                location = f"{dep_desc_resolved} - {rack_desc_resolved}"
+            elif dep_desc_resolved:
+                location = dep_desc_resolved
+            elif rack_desc_resolved:
+                location = rack_desc_resolved
+
+            deposit_id_val = dep_id_resolved or 0
+            rack_id_val = rack_id_resolved or 0
+
+            try:
+                cur.execute('''
+                    INSERT INTO consolidado_csv
                     (counter_name, code_item, magazijn, winkel, total, remarks, current_inventory, difference, count_date, location, deposit_id, rack_id, boxqty, boxunitqty, boxunittotal)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
+                ''', (
                     row.get('counter_name', ''),
                     row.get('code_item', ''),
                     row.get('magazijn', 0),
                     row.get('winkel', 0),
                     row.get('total', 0),
                     row.get('remarks', ''),
-                    0, # current_inventory (no viene en CSV)
-                    row.get('total', 0), # difference (igual a total si no hay current_inventory)
+                    row.get('current_inventory', 0) if 'current_inventory' in df.columns else 0,
+                    row.get('difference', row.get('total', 0)),
                     row.get('count_date', datetime.now().date().isoformat()),
                     location,
-                    row.get('deposit_id', 0),
-                    row.get('rack_id', 0),
+                    deposit_id_val,
+                    rack_id_val,
                     row.get('boxqty', 0),
                     row.get('boxunitqty', 0),
                     row.get('boxunittotal', 0)
                 ))
                 insertados += 1
-            conn.commit()
-            conn.close()
-            messagebox.showinfo("Importación completada", f"Se importaron {insertados} registros desde Deposit_1_Victoria.csv")
+            except Exception as e:
+                try:
+                    row_dict = row.to_dict()
+                except Exception:
+                    row_dict = {"code_item": row.get('code_item', '')}
+                row_dict['_error'] = str(e)
+                row_dict['_row_index'] = int(idx) if idx is not None else None
+                failures.append(row_dict)
+                continue
+
+        conn.commit()
+        conn.close()
+
+        if failures:
+            backup_dir = os.path.join(os.getcwd(), 'backups')
+            os.makedirs(backup_dir, exist_ok=True)
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            fail_path = os.path.join(backup_dir, f"consolidado_import_errors_{ts}.csv")
+            try:
+                import csv as _csv
+                keys = set()
+                for r in failures:
+                    keys.update(r.keys())
+                keys = list(keys)
+                with open(fail_path, 'w', encoding='utf-8', newline='') as fh:
+                    writer = _csv.DictWriter(fh, fieldnames=keys)
+                    writer.writeheader()
+                    for r in failures:
+                        writer.writerow(r)
+            except Exception as e:
+                print(f"No se pudo escribir el log de importación consolidado: {e}")
+
+        msg = f"Importación consolidado completada. Registros insertados: {insertados}."
+        if failures:
+            msg += f" Fallos: {len(failures)}. Log: {fail_path}"
+        messagebox.showinfo("Importación consolidado completada", msg)
 
     # ...widgets...
     # (los binds van después de crear los widgets, sin indentación extra)
@@ -130,6 +496,8 @@ def main():
 
     btn_importar_inventory = ttk.Button(frm, text="Importar Inventory", command=importar_inventory)
     btn_importar_inventory.grid(row=22, column=0, pady=8)
+    btn_importar_consolidado = ttk.Button(frm, text="Importar Consolidado CSV", command=importar_consolidado_csv)
+    btn_importar_consolidado.grid(row=23, column=0, pady=8)
 
     # Campo Remark después de Winkel
     ttk.Label(frm, text="Comentario:").grid(row=11, column=0, sticky="e")
@@ -356,7 +724,7 @@ def main():
     btn_registros.grid(row=22, column=1, pady=8)
 
     # Botón para generar reporte PDF (usa ui_pdf_report.add_pdf_report_button)
-    from ui_pdf_report import add_pdf_report_button, add_pdf_report_por_deposito_button, add_pdf_report_por_contador_button, add_pdf_report_diferencias_button
+    from ui_pdf_report import add_pdf_report_button, add_pdf_report_por_deposito_button, add_pdf_report_por_contador_button, add_pdf_report_diferencias_button, add_pdf_report_diferencias_por_item_button
     btn_pdf = add_pdf_report_button(frm, db_path=DB_NAME, button_text="Generar PDF")
     try:
         btn_pdf.grid(row=22, column=2, pady=8)
@@ -395,6 +763,23 @@ def main():
         btn_pdf_diff = add_pdf_report_diferencias_button(frm, db_path=DB_NAME, button_text="Reporte Diferencias")
         try:
             btn_pdf_diff.grid(row=26, column=2, pady=8)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # Botón reporte Diferencias por Item (agrupa sólo por código)
+    try:
+        from ui_pdf_report import add_pdf_report_diferencias_por_item_button, add_pdf_report_diferencias_threshold_button
+        btn_pdf_diff_item = add_pdf_report_diferencias_por_item_button(frm, db_path=DB_NAME, button_text="Diferencias por Item")
+        try:
+            btn_pdf_diff_item.grid(row=27, column=2, pady=8)
+        except Exception:
+            pass
+        # Button to show only differences with absolute value greater than given threshold
+        btn_pdf_diff_threshold = add_pdf_report_diferencias_threshold_button(frm, db_path=DB_NAME, button_text="Diferencias > X")
+        try:
+            btn_pdf_diff_threshold.grid(row=28, column=2, pady=8)
         except Exception:
             pass
     except Exception:

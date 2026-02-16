@@ -27,6 +27,14 @@ if (Test-Path $exePath) {
     Write-Host "Executable not found: $exePath"
 }
 
+# Add database file (if present next to repo)
+$dbPath = Join-Path (Get-Location) 'inventariovlm.db'
+if (Test-Path $dbPath) {
+    Add-FileToZip $dbPath 'inventariovlm.db'
+} else {
+    Write-Host "Database file not found at project root: $dbPath"
+}
+
 # Add folders
 foreach ($f in $Folders) {
     $src = Join-Path (Get-Location) $f
