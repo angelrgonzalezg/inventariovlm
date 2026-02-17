@@ -130,6 +130,7 @@ def mostrar_registros(root):
 
     # Entradas principales
     edit_counter = ttk.Entry(frm, width=14)
+    # code_item should be visible but not editable: keep normal state but block keys
     edit_code = ttk.Entry(frm, width=12)
     edit_desc = ttk.Entry(frm, width=36, state="readonly")
     edit_boxqty = ttk.Entry(frm, width=8)
@@ -203,16 +204,21 @@ def mostrar_registros(root):
         # Tooltips are best-effort; if anything goes wrong keep UI functional
         pass
 
+    # block typing into the code field (user should not edit it here)
+    def _block_edit_keys(event=None):
+        return "break"
+    edit_code.bind("<Key>", _block_edit_keys)
+
     # (Botones de acción creados más abajo, después de definir las funciones)
 
     # (Eliminada la segunda definición de tree)
     def on_edit_deposit_change(event=None):
+        nonlocal racks_list
         idx = edit_deposit.current()
         if idx < 0:
             edit_rack['values'] = []
             return
         deposit_id = deposits_list[idx][0]
-        nonlocal racks_list
         # get_racks returns a callable (inner); call it with deposit_id
         try:
             racks_list = get_racks()(deposit_id)
@@ -289,10 +295,16 @@ def mostrar_registros(root):
         vals = tree.item(sel, "values")
         if not vals:
             return
+        try:
+            print(f"[ui_registros] on_seleccionar values={vals}")
+            print(f"[ui_registros] code_val repr: {repr(vals[6])}")
+        except Exception:
+            pass
         # vals order: id, counter_name, count_date, deposit_id, rack_id, location, code_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference
         edit_counter.delete(0, tk.END); edit_counter.insert(0, vals[1])
         edit_date.delete(0, tk.END); edit_date.insert(0, vals[2])
         code_val = vals[6]
+        # set code field (blocked for typing)
         edit_code.delete(0, tk.END); edit_code.insert(0, code_val)
         # try to load description and current inventory from items
         try:
@@ -323,42 +335,74 @@ def mostrar_registros(root):
         except Exception:
             deposit_id_val = None
             rack_id_val = None
+        # normalize types: try to convert ids to int for comparisons/calls
+        try:
+            deposit_id_val = int(deposit_id_val)
+        except Exception:
+            pass
+        try:
+            rack_id_val = int(rack_id_val)
+        except Exception:
+            pass
+
+        nonlocal racks_list
         if deposit_id_val is not None:
             # find deposit name
             dep_name = ""
             for d in deposits_list:
-                if d[0] == deposit_id_val:
+                # compare as ints or strings to be robust
+                if (isinstance(d[0], int) and d[0] == deposit_id_val) or (str(d[0]) == str(deposit_id_val)):
                     dep_name = d[1]
                     break
             if dep_name:
                 edit_deposit.set(dep_name)
-                nonlocal racks_list
+                # Prefer to lookup rack description directly by rack_id in the racks table
+                try:
+                    conn2 = sqlite3.connect(DB_NAME)
+                    cur2 = conn2.cursor()
+                    cur2.execute("SELECT rack_description FROM racks WHERE rack_id = ?", (rack_id_val,))
+                    rr = cur2.fetchone()
+                    conn2.close()
+                except Exception:
+                    rr = None
+
                 try:
                     racks_list = get_racks()(deposit_id_val)
                 except Exception:
                     racks_list = []
                 racks_display_local = [r[1] if isinstance(r, (list, tuple)) and len(r) > 1 else r for r in racks_list]
-                edit_rack['values'] = racks_display_local
-                # find rack name from rack_id_val
-                rack_name = ""
-                for r in racks_list:
-                    # r may be (id, description) or a single value
-                    if isinstance(r, (list, tuple)) and len(r) > 1:
-                        if r[0] == rack_id_val:
-                            rack_name = r[1]
-                            break
+                # if we found a rack description by id, prefer that and ensure it's in the combobox values
+                if rr and rr[0]:
+                    rack_name = rr[0]
+                    # ensure the combobox values include this rack description
+                    if rack_name not in racks_display_local:
+                        edit_rack['values'] = [rack_name] + racks_display_local
                     else:
-                        # if racks are simple values, compare directly to rack_id_val
-                        if r == rack_id_val or str(r) == str(rack_id_val):
-                            rack_name = r
-                            break
-                
-                if rack_name:
+                        edit_rack['values'] = racks_display_local
                     edit_rack.set(rack_name)
-                elif racks_display_local:
-                    edit_rack.current(0)
                 else:
-                    edit_rack.set("")
+                    # fallback: try to match by id inside the fetched racks_list
+                    rack_name = ""
+                    for r in racks_list:
+                        if isinstance(r, (list, tuple)) and len(r) > 1:
+                            if (isinstance(r[0], int) and r[0] == rack_id_val) or (str(r[0]) == str(rack_id_val)):
+                                rack_name = r[1]
+                                break
+                        else:
+                            if (isinstance(r, int) and r == rack_id_val) or str(r) == str(rack_id_val):
+                                rack_name = r
+                                break
+
+                    if rack_name:
+                        edit_rack['values'] = racks_display_local
+                        edit_rack.set(rack_name)
+                    else:
+                        # final fallback: if there are any racks for this deposit, select first; else clear
+                        edit_rack['values'] = racks_display_local
+                        if racks_display_local:
+                            edit_rack.current(0)
+                        else:
+                            edit_rack.set("")
             else:
                 edit_deposit.set("")
                 edit_rack['values'] = []
