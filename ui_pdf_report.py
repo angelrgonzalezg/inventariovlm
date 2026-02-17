@@ -118,6 +118,10 @@ def add_pdf_report_diferencias_threshold_button(parent_frame, db_path: str = DEF
     return _make_button(parent_frame, row=29, text=button_text, command=lambda: generate_pdf_report_diferencias_threshold(parent_frame, db_path))
 
 
+def add_pdf_report_diferencias_por_counter_button(parent_frame, db_path: str = DEFAULT_DB, button_text: str = "Diferencias por Counter/Loc/Item"):
+    return _make_button(parent_frame, row=30, text=button_text, command=lambda: generate_pdf_report_diferencias_por_counter(parent_frame, db_path))
+
+
 # ----------------- Report generators -----------------
 
 
@@ -1109,6 +1113,148 @@ def generate_pdf_report_diferencias_por_item(parent, db_path: str = DEFAULT_DB):
         table.setStyle(tbl_style)
         story.append(table)
 
+
+def generate_pdf_report_diferencias_item_detalle(parent, db_path: str = DEFAULT_DB):
+    """Generate a PDF for a single item (asked from user) showing differences grouped
+    by `counter_name` and `location`. The user is prompted for the `code_item`.
+    """
+    try:
+        from tkinter import simpledialog
+    except Exception:
+        simpledialog = None
+
+    if simpledialog is None:
+        messagebox.showerror("Error", "No se puede pedir el parámetro al usuario (simpledialog no disponible).", parent=parent)
+        return
+
+    item_code = simpledialog.askstring("Código de Item", "Ingrese el código del item:", parent=parent)
+    if not item_code:
+        return
+
+    file_path = _asksave(parent)
+    if not file_path:
+        return
+    if not _ensure_reportlab(parent):
+        return
+    if not os.path.exists(db_path):
+        messagebox.showerror("Error", f"No se encontró la base de datos: {db_path}", parent=parent)
+        return
+
+    sql = '''
+    SELECT ic.counter_name AS counter,
+           ic.location AS ubicacion,
+           SUM(ic.boxunittotal) AS en_cajas,
+           SUM(ic.magazijn) AS sueltos,
+           SUM(ic.total) AS total,
+           MAX(i.current_inventory) AS inventario_actual,
+           SUM(ic.total) - MAX(i.current_inventory) AS diferencia,
+           MAX(i.description_item) AS descripcion
+      FROM inventory_count ic
+      LEFT JOIN items i ON i.code_item = ic.code_item
+     WHERE ic.code_item = ?
+     GROUP BY ic.counter_name, ic.location
+     ORDER BY ic.counter_name ASC, ABS(diferencia) DESC;
+    '''
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(sql, (item_code,))
+        rows = cur.fetchall()
+        # try to fetch item description from first row if present
+        item_desc = rows[0][7] if rows else None
+        conn.close()
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al leer la base de datos: {e}", parent=parent)
+        return
+
+    # lazy imports for reportlab
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+
+    styles = getSampleStyleSheet()
+    title_style = styles["Heading1"]
+    subtitle_style = styles.get("Heading3", styles["Heading2"])
+    normal = styles["Normal"]
+
+    doc = SimpleDocTemplate(file_path, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+    story = []
+    title = f"Reporte Detallado de Diferencias para Item {item_code}"
+    if item_desc:
+        title += f" — {item_desc}"
+    story.append(Paragraph(title, title_style))
+    story.append(Spacer(1, 8))
+
+    if not rows:
+        story.append(Paragraph("No hay registros para ese código de item.", normal))
+    else:
+        # group rows by counter
+        grouped = {}
+        for r in rows:
+            counter = r[0] or ""
+            location = (r[1] or "")[:200]
+            entry = {
+                "en_cajas": r[2] or 0,
+                "sueltos": r[3] or 0,
+                "total": r[4] or 0,
+                "actual": r[5] or 0,
+                "diferencia": r[6] or 0,
+            }
+            grouped.setdefault(counter, []).append((location, entry))
+
+        # iterate counters
+        for ci, counter in enumerate(sorted(grouped.keys())):
+            story.append(Paragraph(f"Contador: {counter}", subtitle_style))
+            story.append(Spacer(1, 6))
+
+            # Build table per counter with locations as rows
+            col_headers = ["Ubicación", "En Cajas", "Sueltos", "Total", "Actual", "Diferencia"]
+            data = [col_headers]
+            items = grouped[counter]
+            # sort by absolute diferencia
+            items = sorted(items, key=lambda x: abs(x[1].get("diferencia", 0)), reverse=True)
+            for loc, it in items:
+                data.append([
+                    loc,
+                    str(it["en_cajas"]),
+                    str(it["sueltos"]),
+                    str(it["total"]),
+                    str(it["actual"]),
+                    str(it["diferencia"]) if it.get("diferencia") is not None else "",
+                ])
+
+            table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[300, 60, 60, 60, 60, 60])
+            tbl_style = TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d3d3d3")),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ])
+            table.setStyle(tbl_style)
+            story.append(table)
+            story.append(Spacer(1, 8))
+
+            if ci != len(grouped) - 1:
+                story.append(PageBreak())
+
+    try:
+        doc.build(story)
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al generar el PDF: {e}", parent=parent)
+        return
+
+    _open_pdf_file(file_path, parent=parent)
+    messagebox.showinfo("OK", f"Reporte PDF generado: {file_path}", parent=parent)
+
+
+def add_pdf_report_diferencias_por_item_detalle_button(parent_frame, db_path: str = DEFAULT_DB, button_text: str = "Diferencias Item Detalle"):
+    return _make_button(parent_frame, row=30, text=button_text, command=lambda: generate_pdf_report_diferencias_item_detalle(parent_frame, db_path))
+
     try:
         doc.build(story)
     except Exception as e:
@@ -1213,6 +1359,157 @@ def generate_pdf_report_diferencias_threshold(parent, db_path: str = DEFAULT_DB)
         ])
         table.setStyle(tbl_style)
         story.append(table)
+
+    try:
+        doc.build(story)
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al generar el PDF: {e}", parent=parent)
+        return
+
+    _open_pdf_file(file_path, parent=parent)
+    messagebox.showinfo("OK", f"Reporte PDF generado: {file_path}", parent=parent)
+
+
+def generate_pdf_report_diferencias_por_counter(parent, db_path: str = DEFAULT_DB):
+    """Generate report grouped by counter_name, location and item using the provided SQL.
+    Filters differences between 20 and 100 (as in the supplied query).
+    """
+    file_path = _asksave(parent)
+    if not file_path:
+        return
+    if not _ensure_reportlab(parent):
+        return
+    if not os.path.exists(db_path):
+        messagebox.showerror("Error", f"No se encontró la base de datos: {db_path}", parent=parent)
+        return
+
+    # ask user for absolute-difference range
+    try:
+        from tkinter import simpledialog
+    except Exception:
+        simpledialog = None
+
+    if simpledialog is None:
+        messagebox.showerror("Error", "No se puede pedir el parámetro al usuario (simpledialog no disponible).", parent=parent)
+        return
+
+    minv = simpledialog.askinteger("Rango mínimo", "Valor mínimo de |diferencia|:", parent=parent, minvalue=0)
+    if minv is None:
+        return
+    maxv = simpledialog.askinteger("Rango máximo", "Valor máximo de |diferencia|:", parent=parent, minvalue=minv)
+    if maxv is None:
+        return
+
+    sql = '''
+SELECT 
+       ic.counter_name AS counter,
+       ic.location AS ubicacion, 
+       ic.code_item AS item,
+       MAX(i.description_item) AS item_descripcion, 
+       SUM(boxunittotal) AS en_cajas, 
+       SUM(ic.magazijn) AS sueltos, 
+       SUM(ic.total) AS total, 
+       MAX(i.current_inventory) AS inventario_actual,
+       SUM(ic.total) - MAX(i.current_inventory) AS diferencia
+FROM inventory_count ic
+JOIN items i      ON i.code_item = ic.code_item
+JOIN racks r      ON r.rack_id = ic.rack_id
+JOIN deposits d   ON d.deposit_id = ic.deposit_id
+GROUP BY ic.code_item, ic.counter_name, ic.location
+HAVING ABS(SUM(ic.total) - MAX(i.current_inventory)) BETWEEN ? AND ?
+ORDER BY ABS(diferencia) DESC;
+'''
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(sql, (minv, maxv))
+        rows = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al leer la base de datos: {e}", parent=parent)
+        return
+
+    # PDF build - group by counter -> location -> items; page break per counter
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+
+    styles = getSampleStyleSheet()
+    title_style = styles["Heading1"]
+    subtitle_style = styles.get("Heading3", styles["Heading2"])
+    normal = styles["Normal"]
+
+    doc = SimpleDocTemplate(file_path, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+    story = []
+    story.append(Paragraph(f"Reporte Diferencias por Contador / Ubicación / Item (|diferencia| entre {minv} y {maxv})", title_style))
+    story.append(Spacer(1, 8))
+
+    if not rows:
+        story.append(Paragraph("No hay registros que cumplan el filtro.", normal))
+    else:
+        # organize rows into nested dict: counter -> location -> list(rows)
+        grouped = {}
+        for r in rows:
+            counter = r[0] or ""
+            location = (r[1] or "")[:200]
+            entry = {
+                "code": r[2] or "",
+                "description": (r[3] or "")[:200],
+                "encajas": r[4] or 0,
+                "sueltos": r[5] or 0,
+                "total": r[6] or 0,
+                "actual": r[7] or 0,
+                "diferencia": r[8] or 0,
+            }
+            grouped.setdefault(counter, {}).setdefault(location, []).append(entry)
+
+        # iterate counters in sorted order
+        counters = list(grouped.keys())
+        for ci, counter in enumerate(counters):
+            # add counter header
+            story.append(Paragraph(f"Contador: {counter}", subtitle_style))
+            story.append(Spacer(1, 6))
+
+            locations = list(grouped[counter].keys())
+            for location in locations:
+                story.append(Paragraph(f"Ubicación: {location}", styles.get("Heading4", normal)))
+                story.append(Spacer(1, 4))
+
+                # table headers
+                col_headers = ["Código", "Descripción", "En Cajas", "Sueltos", "Total", "Actual", "Diferencia"]
+                data = [col_headers]
+                # sort items by absolute diferencia desc
+                items = sorted(grouped[counter][location], key=lambda x: abs(x.get("diferencia", 0)), reverse=True)
+                for it in items:
+                    data.append([
+                        it["code"],
+                        it["description"],
+                        str(it["encajas"]),
+                        str(it["sueltos"]),
+                        str(it["total"]),
+                        str(it["actual"]),
+                        str(it["diferencia"]) if it.get("diferencia") is not None else "",
+                    ])
+
+                table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[80, 340, 50, 50, 60, 60, 60])
+                tbl_style = TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d3d3d3")),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ])
+                table.setStyle(tbl_style)
+                story.append(table)
+                story.append(Spacer(1, 8))
+
+            # add a page break between counters except after last
+            if ci != len(counters) - 1:
+                story.append(PageBreak())
 
     try:
         doc.build(story)

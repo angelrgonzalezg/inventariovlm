@@ -1,0 +1,15 @@
+select ic.code_item item,
+       ic.location ubicacion, 
+       max(i.description_item) item_descripcion, 
+       sum(boxunittotal) en_cajas, 
+       sum(ic.magazijn) sueltos, 
+       sum(ic.total) total, 
+       max(i.current_inventory) inventario_actual,
+       SUM(ic.total)  - MAX(i.current_inventory) AS diferencia
+  from inventory_count ic, items i, racks r, deposits d
+ where i.code_item = ic.code_item
+   and r.rack_id = ic.rack_id
+   and d.deposit_id = ic.deposit_id
+   --and i.code_item like '01%'
+   and i.code_item >= '013%' and  i.code_item < '0160'
+      group by ic.code_item, ic.location

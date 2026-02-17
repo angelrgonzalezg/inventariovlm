@@ -770,7 +770,12 @@ def main():
 
     # Botón reporte Diferencias por Item (agrupa sólo por código)
     try:
-        from ui_pdf_report import add_pdf_report_diferencias_por_item_button, add_pdf_report_diferencias_threshold_button
+        from ui_pdf_report import (
+            add_pdf_report_diferencias_por_item_button,
+            add_pdf_report_diferencias_threshold_button,
+            add_pdf_report_diferencias_por_counter_button,
+            add_pdf_report_diferencias_por_item_detalle_button,
+        )
         btn_pdf_diff_item = add_pdf_report_diferencias_por_item_button(frm, db_path=DB_NAME, button_text="Diferencias por Item")
         try:
             btn_pdf_diff_item.grid(row=27, column=2, pady=8)
@@ -780,6 +785,21 @@ def main():
         btn_pdf_diff_threshold = add_pdf_report_diferencias_threshold_button(frm, db_path=DB_NAME, button_text="Diferencias > X")
         try:
             btn_pdf_diff_threshold.grid(row=28, column=2, pady=8)
+        except Exception:
+            pass
+        # Button for differences grouped by counter, location and item
+        btn_pdf_diff_counter = add_pdf_report_diferencias_por_counter_button(frm, db_path=DB_NAME, button_text="Diferencias por Counter/Loc/Item")
+        try:
+            btn_pdf_diff_counter.grid(row=29, column=2, pady=8)
+        except Exception:
+            pass
+        # Button for detailed differences per item (asks for item code)
+        try:
+            btn_pdf_diff_item_det = add_pdf_report_diferencias_por_item_detalle_button(frm, db_path=DB_NAME, button_text="Diferencias Item Detalle")
+            try:
+                btn_pdf_diff_item_det.grid(row=30, column=2, pady=8)
+            except Exception:
+                pass
         except Exception:
             pass
     except Exception:
