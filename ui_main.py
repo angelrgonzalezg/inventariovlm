@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from tkcalendar import DateEntry
 from db_utils import get_deposits, get_racks
-from ui_registros import mostrar_registros
+from ui_registros import mostrar_registros, mostrar_registros_resumen
 import pandas as pd
 from datetime import datetime
 import sys
@@ -716,32 +716,177 @@ def main():
         messagebox.showinfo("Actualización completada", summary, parent=root)
 
     btn_update_current = ttk.Button(frm, text="Actualizar current_inventory (CSV)", command=lambda: actualizar_current_inventory_from_csv())
-    btn_update_current.grid(row=21, column=2, pady=8)
+    btn_update_current.grid(row=24, column=0, pady=8)
+
+    def generar_inventory_count_res():
+        """Aggregate `inventory_count` by `code_item` and insert summarized rows into `inventory_count_res`.
+        This function is compatible with the existing table schema (columns: code_item, description_item,
+        boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, updated_date).
+        The user is asked whether to clear existing rows before inserting.
+        """
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            cur = conn.cursor()
+
+            # Ensure table exists with expected schema (if missing, create compatible schema)
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS inventory_count_res (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code_item TEXT(10) NOT NULL REFERENCES items (code_item),
+                    description_item TEXT,
+                    boxqty INTEGER DEFAULT 0,
+                    boxunitqty INTEGER DEFAULT 0,
+                    boxunittotal INTEGER DEFAULT 0,
+                    magazijn INTEGER DEFAULT 0,
+                    winkel INTEGER DEFAULT 0,
+                    total INTEGER,
+                    current_inventory INTEGER,
+                    difference INTEGER,
+                    updated_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (code_item) REFERENCES items (code_item)
+                )
+            ''')
+
+            # Ask whether to clear existing data
+            clear = messagebox.askyesno("Confirmar", "¿Borrar registros existentes en 'inventory_count_res' antes de generar?\n(Si no, se agregarán nuevas filas)", parent=root)
+            if clear:
+                cur.execute("DELETE FROM inventory_count_res")
+
+            # Aggregate values from inventory_count
+            cur.execute('''
+                SELECT ic.code_item AS code_item,
+                       COALESCE(SUM(ic.boxqty),0) AS boxqty,
+                       COALESCE(SUM(ic.boxunitqty),0) AS boxunitqty,
+                       COALESCE(SUM(ic.boxunittotal),0) AS boxunittotal,
+                       COALESCE(SUM(ic.magazijn),0) AS magazijn,
+                       COALESCE(SUM(ic.winkel),0) AS winkel,
+                       COALESCE(SUM(ic.total),0) AS total,
+                       MAX(COALESCE(i.description_item, '')) AS description_item,
+                       MAX(COALESCE(i.current_inventory,0)) AS current_inventory
+                  FROM inventory_count ic
+                  LEFT JOIN items i ON i.code_item = ic.code_item
+                 GROUP BY ic.code_item
+            ''')
+            rows = cur.fetchall()
+            if not rows:
+                messagebox.showinfo("Sin datos", "No se encontraron registros en 'inventory_count' para agregar.", parent=root)
+                conn.close()
+                return
+
+            inserted = 0
+            ts = datetime.now().isoformat()
+            for r in rows:
+                code_item = r[0] or ''
+                boxqty = int(r[1] or 0)
+                boxunitqty = int(r[2] or 0)
+                boxunittotal = int(r[3] or 0)
+                magazijn = int(r[4] or 0)
+                winkel = int(r[5] or 0)
+                total = int(r[6] or 0)
+                description_item = r[7] or ''
+                current_inventory = int(r[8] or 0)
+                difference = current_inventory - total
+
+                cur.execute(
+                    '''INSERT INTO inventory_count_res
+                       (code_item, description_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, updated_date)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+                    (code_item, description_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, ts)
+                )
+                inserted += 1
+
+            conn.commit()
+            conn.close()
+            messagebox.showinfo("OK", f"Se insertaron {inserted} registros en inventory_count_res", parent=root)
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+            messagebox.showerror("Error", f"Error al generar inventory_count_res: {e}", parent=root)
+
+    btn_gen_res = ttk.Button(frm, text="Generar inventory_count_res", command=generar_inventory_count_res)
+    btn_gen_res.grid(row=25, column=0, pady=8)
     msg_guardado = tk.StringVar()
     lbl_guardado = ttk.Label(frm, textvariable=msg_guardado, foreground="green")
     lbl_guardado.grid(row=20, column=2, padx=8, sticky="w")
     btn_registros = ttk.Button(frm, text="Ver Registros", command=lambda: mostrar_registros(root))
     btn_registros.grid(row=22, column=1, pady=8)
+    btn_registros_resumen = ttk.Button(frm, text="Ver Registros Resumen", command=lambda: mostrar_registros_resumen(root))
+    btn_registros_resumen.grid(row=22, column=2, pady=8, padx=6)
+
+    # Quick reports dropdown (below 'Ver Registros')
+    rpt_options = [
+        "Reporte por Deposito",
+        "Reporte por contador",
+        "Reporte Verificacion",
+        "Reporte Diferencias",
+        "Diferencias por Items",
+        "Diferencias > X",
+        "Diferencias por Counter/Loc/Item",
+        "Diferencia Item Detalle",
+    ]
+    cmb_rpt_main = ttk.Combobox(frm, values=rpt_options, state="readonly", width=36)
+    cmb_rpt_main.set(rpt_options[0])
+    def ejecutar_reporte_main():
+        sel = cmb_rpt_main.get().strip()
+        if not sel:
+            return
+        key = sel.lower().replace(" ", "").replace("/", "").replace("\u00a0", "")
+        try:
+            import ui_pdf_report as rpt
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar los reportes: {e}", parent=root)
+            return
+        try:
+            if "deposito" in key and "por" in key:
+                rpt.generate_pdf_report_por_deposito(root, db_path=DB_NAME)
+            elif "contador" in key and "por" in key:
+                rpt.generate_pdf_report_por_contador(root, db_path=DB_NAME)
+            elif "verific" in key:
+                rpt.generate_pdf_report_verificacion(root, db_path=DB_NAME)
+            elif "diferencias>" in key or "diferencias>x" in key or ">x" in key:
+                rpt.generate_pdf_report_diferencias_threshold(root, db_path=DB_NAME)
+            elif "counterlocitem" in key or "counterlocitem" in key:
+                rpt.generate_pdf_report_diferencias_por_counter(root, db_path=DB_NAME)
+            elif "diferenciasporitems" in key or "poritem" in key:
+                rpt.generate_pdf_report_diferencias_por_item(root, db_path=DB_NAME)
+            elif "diferenciaitemdetalle" in key or "itemdetalle" in key:
+                rpt.generate_pdf_report_diferencias_item_detalle(root, db_path=DB_NAME)
+            elif "diferencias" in key:
+                rpt.generate_pdf_report_diferencias(root, db_path=DB_NAME)
+            else:
+                rpt.generate_pdf_report_diferencias(root, db_path=DB_NAME)
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al ejecutar el reporte: {e}", parent=root)
+
+    btn_rpt_main = ttk.Button(frm, text="Ejecutar reporte", command=ejecutar_reporte_main)
+    cmb_rpt_main.grid(row=23, column=1, padx=6, pady=8, sticky="w")
+    btn_rpt_main.grid(row=23, column=2, padx=6, pady=8, sticky="w")
 
     # Botón para generar reporte PDF (usa ui_pdf_report.add_pdf_report_button)
     from ui_pdf_report import add_pdf_report_button, add_pdf_report_por_deposito_button, add_pdf_report_por_contador_button, add_pdf_report_diferencias_button, add_pdf_report_diferencias_por_item_button
     btn_pdf = add_pdf_report_button(frm, db_path=DB_NAME, button_text="Generar PDF")
     try:
-        btn_pdf.grid(row=22, column=2, pady=8)
+        btn_pdf.grid(row=24, column=2, pady=8)
     except Exception:
         pass
 
     # Botón para reporte por depósito
     btn_pdf_deposito = add_pdf_report_por_deposito_button(frm, db_path=DB_NAME, button_text="Reporte por Depósito")
     try:
-        btn_pdf_deposito.grid(row=23, column=2, pady=8)
+        btn_pdf_deposito.grid(row=25, column=2, pady=8)
     except Exception:
         pass
 
     # Botón para reporte por contador
     btn_pdf_contador = add_pdf_report_por_contador_button(frm, db_path=DB_NAME, button_text="Reporte por Contador")
     try:
-        btn_pdf_contador.grid(row=24, column=2, pady=8)
+        btn_pdf_contador.grid(row=26, column=2, pady=8)
     except Exception:
         pass
 
@@ -750,7 +895,7 @@ def main():
         from ui_pdf_report import add_pdf_report_verificacion_button
         btn_pdf_verif = add_pdf_report_verificacion_button(frm, db_path=DB_NAME, button_text="Reporte Verificación")
         try:
-            btn_pdf_verif.grid(row=25, column=2, pady=8)
+            btn_pdf_verif.grid(row=27, column=2, pady=8)
         except Exception:
             pass
     except Exception:
@@ -762,7 +907,7 @@ def main():
         from ui_pdf_report import add_pdf_report_diferencias_button
         btn_pdf_diff = add_pdf_report_diferencias_button(frm, db_path=DB_NAME, button_text="Reporte Diferencias")
         try:
-            btn_pdf_diff.grid(row=26, column=2, pady=8)
+            btn_pdf_diff.grid(row=28, column=2, pady=8)
         except Exception:
             pass
     except Exception:
@@ -778,26 +923,26 @@ def main():
         )
         btn_pdf_diff_item = add_pdf_report_diferencias_por_item_button(frm, db_path=DB_NAME, button_text="Diferencias por Item")
         try:
-            btn_pdf_diff_item.grid(row=27, column=2, pady=8)
+            btn_pdf_diff_item.grid(row=29, column=2, pady=8)
         except Exception:
             pass
         # Button to show only differences with absolute value greater than given threshold
         btn_pdf_diff_threshold = add_pdf_report_diferencias_threshold_button(frm, db_path=DB_NAME, button_text="Diferencias > X")
         try:
-            btn_pdf_diff_threshold.grid(row=28, column=2, pady=8)
+            btn_pdf_diff_threshold.grid(row=30, column=2, pady=8)
         except Exception:
             pass
         # Button for differences grouped by counter, location and item
         btn_pdf_diff_counter = add_pdf_report_diferencias_por_counter_button(frm, db_path=DB_NAME, button_text="Diferencias por Counter/Loc/Item")
         try:
-            btn_pdf_diff_counter.grid(row=29, column=2, pady=8)
+            btn_pdf_diff_counter.grid(row=31, column=2, pady=8)
         except Exception:
             pass
         # Button for detailed differences per item (asks for item code)
         try:
             btn_pdf_diff_item_det = add_pdf_report_diferencias_por_item_detalle_button(frm, db_path=DB_NAME, button_text="Diferencias Item Detalle")
             try:
-                btn_pdf_diff_item_det.grid(row=30, column=2, pady=8)
+                btn_pdf_diff_item_det.grid(row=32, column=2, pady=8)
             except Exception:
                 pass
         except Exception:

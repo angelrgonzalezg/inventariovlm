@@ -508,5 +508,321 @@ def mostrar_registros(root):
     btn_delete.grid(row=1, column=5, padx=6, pady=2)
     btn_close.grid(row=1, column=6, padx=6, pady=2)
 
+    # --- Nueva UI: selector rápido de reportes + botón ejecutar ---
+    rpt_options = [
+        "Reporte por Deposito",
+        "Reporte por contador",
+        "Reporte Verificaion",
+        "Reporte Diferencias",
+        "Diferencias por Items",
+        "Diferencias > X",
+        "Diferencias por Couneter/Loc/Item",
+        "Diferencia Item Detalle",
+    ]
+    lbl_rpt = ttk.Label(frm, text="Seleccionar reporte:")
+    cmb_rpt = ttk.Combobox(frm, values=rpt_options, state="readonly", width=36)
+    cmb_rpt.set(rpt_options[0])
+    def ejecutar_reporte():
+        sel = cmb_rpt.get().strip()
+        if not sel:
+            return
+        # normalize key
+        key = sel.lower().replace(" ", "").replace("/", "").replace("\u00a0", "")
+        try:
+            import ui_pdf_report as rpt
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar los reportes: {e}", parent=win)
+            return
+
+        try:
+            if "deposito" in key and "por" in key:
+                rpt.generate_pdf_report_por_deposito(win, db_path=DB_NAME)
+            elif "contador" in key and "por" in key:
+                rpt.generate_pdf_report_por_contador(win, db_path=DB_NAME)
+            elif "verific" in key:
+                rpt.generate_pdf_report_verificacion(win, db_path=DB_NAME)
+            elif "diferencias>" in key or "diferencias>x" in key or ">x" in key:
+                rpt.generate_pdf_report_diferencias_threshold(win, db_path=DB_NAME)
+            elif "diferenciaporcounterlocitem" in key or "counterlocitem" in key or "counterlocitem" in key:
+                rpt.generate_pdf_report_diferencias_por_counter(win, db_path=DB_NAME)
+            elif "diferenciasporitems" in key or "poritem" in key:
+                rpt.generate_pdf_report_diferencias_por_item(win, db_path=DB_NAME)
+            elif "diferenciaitemdetalle" in key or "itemdetalle" in key:
+                rpt.generate_pdf_report_diferencias_item_detalle(win, db_path=DB_NAME)
+            elif "diferencias" in key:
+                rpt.generate_pdf_report_diferencias(win, db_path=DB_NAME)
+            else:
+                # default fallback: try open main differences report
+                rpt.generate_pdf_report_diferencias(win, db_path=DB_NAME)
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al ejecutar el reporte: {e}", parent=win)
+
+    btn_rpt_exec = ttk.Button(frm, text="Ejecutar reporte", command=ejecutar_reporte)
+    lbl_rpt.grid(row=1, column=7, padx=6, pady=2)
+    cmb_rpt.grid(row=1, column=8, padx=6, pady=2)
+    btn_rpt_exec.grid(row=1, column=9, padx=6, pady=2)
+
     # Mostrar los datos al abrir la ventana
+    cargar_datos()
+
+
+def mostrar_registros_resumen(root):
+    """Similar window to `mostrar_registros` but operating on `inventory_count_res` summary table."""
+    def cargar_datos(order_by="code_item", order_dir="ASC", filter_code=None):
+        valid_fields = [
+            "id", "code_item", "description_item", "boxqty", "boxunitqty", "boxunittotal",
+            "magazijn", "winkel", "total", "current_inventory", "difference", "updated_date"
+        ]
+        col_sql = order_by if order_by in valid_fields else "code_item"
+        order_dir_sql = "ASC" if str(order_dir).upper() != "DESC" else "DESC"
+        for r in tree.get_children():
+            tree.delete(r)
+        conn = sqlite3.connect(DB_NAME)
+        cur = conn.cursor()
+        try:
+            query = (
+                "SELECT id, code_item, description_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, updated_date "
+                "FROM inventory_count_res"
+            )
+            params = ()
+            if filter_code:
+                query += " WHERE code_item = ?"
+                params = (filter_code,)
+            query += f" ORDER BY {col_sql} {order_dir_sql}"
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            print(f"[ui_registros_resumen] cargar_datos: fetched {len(rows)} rows (filter={filter_code})")
+            for row in rows:
+                tree.insert("", "end", values=row)
+        except Exception as e:
+            messagebox.showerror("Error de consulta", f"No se pudo cargar registros resumen: {e}")
+        finally:
+            conn.close()
+
+    # track current sort settings
+    sort_field = "code_item"
+    sort_dir = "ASC"
+
+    def on_ordenar(col):
+        nonlocal sort_field, sort_dir
+        # if clicking same column, toggle direction
+        if col == sort_field:
+            sort_dir = "DESC" if sort_dir == "ASC" else "ASC"
+        else:
+            sort_field = col
+            sort_dir = "ASC"
+        # update UI control if present
+        try:
+            cmb_sort.set(sort_field)
+            btn_dir.config(text=sort_dir)
+        except Exception:
+            pass
+        cargar_datos(order_by=sort_field, order_dir=sort_dir)
+
+    win = tk.Toplevel(root)
+    win.title("Registros Resumen")
+    # Make the window larger so more columns are visible
+    win.geometry("2000x800")
+
+    cols = ("id", "code_item", "description_item", "boxqty", "boxunitqty", "boxunittotal", "magazijn", "winkel", "total", "current_inventory", "difference", "updated_date")
+    tree = ttk.Treeview(win, columns=cols, show="headings", height=14)
+    for col in cols:
+        heading = col.replace("_", " ").title()
+        tree.heading(col, text=heading, command=lambda c=col: on_ordenar(c))
+        # wider defaults per column to fit more data on large window
+        if col == "id":
+            width = 60
+        elif col == "code_item":
+            width = 140
+        elif col == "description_item":
+            width = 320
+        elif col in ("boxqty", "boxunitqty", "boxunittotal"):
+            width = 100
+        elif col in ("magazijn", "winkel"):
+            width = 90
+        elif col in ("total", "current_inventory", "difference"):
+            width = 110
+        elif col == "updated_date":
+            width = 160
+        else:
+            width = 120
+        tree.column(col, width=width, anchor="center")
+    tree.pack(fill="both", expand=True, padx=6, pady=6)
+
+    frm = ttk.Frame(win, padding=6)
+    frm.pack(fill="x", padx=6, pady=(0,6))
+
+    # Entradas principales (summary fields)
+    edit_code = ttk.Entry(frm, width=14)
+    edit_desc = ttk.Entry(frm, width=36, state="readonly")
+    edit_boxqty = ttk.Entry(frm, width=8)
+    edit_boxunitqty = ttk.Entry(frm, width=8)
+    edit_boxunittotal = ttk.Entry(frm, width=10, state="readonly")
+    edit_mag = ttk.Entry(frm, width=8)
+    edit_win = ttk.Entry(frm, width=8)
+    edit_total = ttk.Entry(frm, width=10, state="readonly")
+    edit_current = ttk.Entry(frm, width=10, state="readonly")
+    edit_diff = ttk.Entry(frm, width=10, state="readonly")
+    edit_updated = ttk.Entry(frm, width=18)
+
+    lbl_filter = ttk.Label(frm, text="Filtrar código:")
+    edit_filter = ttk.Entry(frm, width=12)
+    btn_filter = ttk.Button(frm, text="Filtrar", command=lambda: cargar_datos(filter_code=edit_filter.get().strip() or None))
+    btn_clear = ttk.Button(frm, text="Limpiar filtro", command=lambda: (edit_filter.delete(0, tk.END), cargar_datos()))
+
+    edit_code.grid(row=0, column=0, padx=2, pady=2)
+    edit_desc.grid(row=0, column=1, padx=2, pady=2)
+    edit_boxqty.grid(row=0, column=2, padx=2, pady=2)
+    edit_boxunitqty.grid(row=0, column=3, padx=2, pady=2)
+    edit_boxunittotal.grid(row=0, column=4, padx=2, pady=2)
+    edit_mag.grid(row=0, column=5, padx=2, pady=2)
+    edit_win.grid(row=0, column=6, padx=2, pady=2)
+    edit_total.grid(row=0, column=7, padx=2, pady=2)
+    edit_current.grid(row=0, column=8, padx=2, pady=2)
+    edit_diff.grid(row=0, column=9, padx=2, pady=2)
+    edit_updated.grid(row=0, column=10, padx=2, pady=2)
+    lbl_filter.grid(row=1, column=0, padx=2, pady=2)
+    edit_filter.grid(row=1, column=1, padx=2, pady=2)
+    btn_filter.grid(row=1, column=2, padx=2, pady=2)
+    btn_clear.grid(row=1, column=3, padx=2, pady=2)
+
+    # Sorting controls: field selector and direction toggle (user-friendly labels)
+    lbl_sort = ttk.Label(frm, text="Ordenar por:")
+    # Map display labels -> SQL columns
+    sort_display_map = {"Código": "code_item", "Diferencia": "difference"}
+    sort_display_values = list(sort_display_map.keys())
+    reverse_sort_map = {v: k for k, v in sort_display_map.items()}
+    cmb_sort = ttk.Combobox(frm, values=sort_display_values, state="readonly", width=18)
+    cmb_sort.set(sort_display_values[0])
+    def on_sort_field_change(event=None):
+        nonlocal sort_field, sort_dir
+        sel = cmb_sort.get()
+        sort_field = sort_display_map.get(sel, "code_item")
+        sort_dir = "ASC"
+        btn_dir.config(text=sort_dir)
+        cargar_datos(order_by=sort_field, order_dir=sort_dir, filter_code=edit_filter.get().strip() or None)
+    cmb_sort.bind("<<ComboboxSelected>>", on_sort_field_change)
+
+    btn_dir = ttk.Button(frm, text="ASC", width=6)
+    # toggle direction
+    def toggle_dir():
+        nonlocal sort_dir
+        sort_dir = "DESC" if sort_dir == "ASC" else "ASC"
+        btn_dir.config(text=sort_dir)
+        cargar_datos(order_by=sort_field, order_dir=sort_dir, filter_code=edit_filter.get().strip() or None)
+    btn_dir.config(command=toggle_dir)
+
+    # Place sorting controls on their own row to separate them from the filter line
+    lbl_sort.grid(row=2, column=0, padx=6, pady=2, sticky="w")
+    cmb_sort.grid(row=2, column=1, padx=2, pady=2, sticky="w")
+    btn_dir.grid(row=2, column=2, padx=2, pady=2, sticky="w")
+    # Checkbox to show/hide the updated_date column to gain horizontal space
+    show_date_var = tk.BooleanVar(value=True)
+    def toggle_date_column():
+        if show_date_var.get():
+            tree.column('updated_date', width=160, minwidth=50)
+            tree.heading('updated_date', text='Updated Date')
+        else:
+            # hide by shrinking width to zero
+            tree.column('updated_date', width=0, minwidth=0)
+            tree.heading('updated_date', text='')
+    chk_date = ttk.Checkbutton(frm, text="Mostrar fecha", variable=show_date_var, command=toggle_date_column)
+    chk_date.grid(row=2, column=3, padx=6, pady=2, sticky="w")
+
+    # block typing into the code field if desired
+    def _block_edit_keys(event=None):
+        return "break"
+    edit_code.bind("<Key>", _block_edit_keys)
+
+    def on_seleccionar(event=None):
+        sel = tree.focus()
+        if not sel:
+            return
+        vals = tree.item(sel, "values")
+        if not vals:
+            return
+        # vals order: id, code_item, description_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, updated_date
+        edit_code.delete(0, tk.END); edit_code.insert(0, vals[1])
+        edit_desc.config(state="normal"); edit_desc.delete(0, tk.END); edit_desc.insert(0, vals[2]); edit_desc.config(state="readonly")
+        edit_boxqty.delete(0, tk.END); edit_boxqty.insert(0, vals[3])
+        edit_boxunitqty.delete(0, tk.END); edit_boxunitqty.insert(0, vals[4])
+        edit_boxunittotal.config(state="normal"); edit_boxunittotal.delete(0, tk.END); edit_boxunittotal.insert(0, vals[5]); edit_boxunittotal.config(state="readonly")
+        edit_mag.delete(0, tk.END); edit_mag.insert(0, vals[6])
+        edit_win.delete(0, tk.END); edit_win.insert(0, vals[7])
+        edit_total.config(state="normal"); edit_total.delete(0, tk.END); edit_total.insert(0, vals[8]); edit_total.config(state="readonly")
+        edit_current.config(state="normal"); edit_current.delete(0, tk.END); edit_current.insert(0, vals[9]); edit_current.config(state="readonly")
+        edit_diff.config(state="normal"); edit_diff.delete(0, tk.END); edit_diff.insert(0, vals[10]); edit_diff.config(state="readonly")
+        edit_updated.delete(0, tk.END); edit_updated.insert(0, vals[11])
+
+    tree.bind("<<TreeviewSelect>>", on_seleccionar)
+
+    def actualizar_registro():
+        sel = tree.focus()
+        if not sel:
+            messagebox.showerror("Error", "Selecciona un registro")
+            return
+        id_reg = tree.item(sel, "values")[0]
+        code = edit_code.get().strip()
+        desc = edit_desc.get().strip()
+        try:
+            boxqty = int(edit_boxqty.get() or 0)
+            boxunitqty = int(edit_boxunitqty.get() or 0)
+            magazijn = int(edit_mag.get() or 0)
+            winkel = int(edit_win.get() or 0)
+        except ValueError:
+            messagebox.showerror("Error", "Magazijn y Winkel deben ser números enteros")
+            return
+        boxunittotal = boxqty * boxunitqty
+        total = boxunittotal + magazijn + winkel
+        try:
+            cur = sqlite3.connect(DB_NAME).cursor()
+            cur.execute("""
+                UPDATE inventory_count_res
+                SET code_item=?, description_item=?, boxqty=?, boxunitqty=?, boxunittotal=?, magazijn=?, winkel=?, total=?, current_inventory=?, difference=?, updated_date=?
+                WHERE id=?
+            """, (code, desc, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, int(edit_current.get() or 0), total - int(edit_current.get() or 0), edit_updated.get() or datetime.now().isoformat(), id_reg))
+            conn = cur.connection
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo actualizar registro resumen: {e}")
+            return
+        cargar_datos(filter_code=edit_filter.get().strip() or None)
+        messagebox.showinfo("OK", "Registro actualizado")
+
+    def eliminar_registro():
+        sel = tree.focus()
+        if not sel:
+            messagebox.showerror("Error", "Selecciona un registro")
+            return
+        id_reg = tree.item(sel, "values")[0]
+        if not messagebox.askyesno("Confirmar", "¿Eliminar este registro resumen?"):
+            return
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            cur = conn.cursor()
+            cur.execute("DELETE FROM inventory_count_res WHERE id = ?", (id_reg,))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo eliminar registro resumen: {e}")
+            return
+        cargar_datos()
+        for w in (edit_code, edit_desc, edit_boxqty, edit_boxunitqty, edit_boxunittotal, edit_mag, edit_win, edit_total, edit_current, edit_diff, edit_updated):
+            try:
+                w.config(state="normal"); w.delete(0, tk.END)
+                if w in (edit_desc, edit_boxunittotal, edit_total, edit_current, edit_diff):
+                    w.config(state="readonly")
+            except Exception:
+                pass
+        messagebox.showinfo("OK", "Registro eliminado")
+
+    # Botones de acción
+    btn_update = ttk.Button(frm, text="Actualizar", command=actualizar_registro)
+    btn_delete = ttk.Button(frm, text="Eliminar", command=eliminar_registro)
+    btn_close = ttk.Button(frm, text="Cerrar", command=win.destroy)
+    btn_update.grid(row=1, column=4, padx=6, pady=2)
+    btn_delete.grid(row=1, column=5, padx=6, pady=2)
+    btn_close.grid(row=1, column=6, padx=6, pady=2)
+
     cargar_datos()
