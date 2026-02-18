@@ -871,7 +871,11 @@ def main():
         "Reporte por Deposito",
         "Reporte por contador",
         "Reporte Verificacion",
+        "Reporte Verificacion (con Remarks)",
         "Reporte Diferencias",
+        "Diferencias Resumen (inventory_count_res)",
+        "Registros Sin codigo",
+        "Items no en Inventario",
         "Diferencias por Items",
         "Diferencias > X",
         "Diferencias por Counter/Loc/Item",
@@ -887,13 +891,27 @@ def main():
         try:
             import ui_pdf_report as rpt
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo cargar los reportes: {e}", parent=root)
-            return
+            # If main report module failed to import (syntax error), try the standalone resumen module
+            try:
+                import ui_pdf_report_resumen as rpt
+            except Exception:
+                messagebox.showerror("Error", f"No se pudo cargar los reportes: {e}", parent=root)
+                return
         try:
             if "deposito" in key and "por" in key:
                 rpt.generate_pdf_report_por_deposito(root, db_path=DB_NAME)
             elif "contador" in key and "por" in key:
                 rpt.generate_pdf_report_por_contador(root, db_path=DB_NAME)
+            elif "verific" in key and "remarks" in key:
+                fn = getattr(rpt, 'generate_pdf_report_verificacion_remarks', None)
+                if fn is not None:
+                    fn(root, db_path=DB_NAME)
+                else:
+                    try:
+                        import ui_pdf_report_resumen as rpt_res
+                        rpt_res.generate_pdf_report_verificacion_remarks(root, db_path=DB_NAME)
+                    except Exception:
+                        raise
             elif "verific" in key:
                 rpt.generate_pdf_report_verificacion(root, db_path=DB_NAME)
             elif "diferencias>" in key or "diferencias>x" in key or ">x" in key:
@@ -902,6 +920,39 @@ def main():
                 rpt.generate_pdf_report_diferencias_por_counter(root, db_path=DB_NAME)
             elif "diferenciasporitems" in key or "poritem" in key:
                 rpt.generate_pdf_report_diferencias_por_item(root, db_path=DB_NAME)
+            elif "sincodigo" in key or "registrossincodigo" in key or "nocode" in key:
+                # prefer function on loaded module, otherwise call the resumen module
+                fn = getattr(rpt, 'generate_pdf_report_nocode_items', None)
+                if fn is not None:
+                    fn(root, db_path=DB_NAME)
+                else:
+                    try:
+                        import ui_pdf_report_resumen as rpt_res
+                        rpt_res.generate_pdf_report_nocode_items(root, db_path=DB_NAME)
+                    except Exception:
+                        raise
+            elif "itemsnoeninventario" in key or "noeninventario" in key or "itemsno" in key:
+                fn = getattr(rpt, 'generate_pdf_report_items_not_in_inventory', None)
+                if fn is not None:
+                    fn(root, db_path=DB_NAME)
+                else:
+                    try:
+                        import ui_pdf_report_resumen as rpt_res
+                        rpt_res.generate_pdf_report_items_not_in_inventory(root, db_path=DB_NAME)
+                    except Exception:
+                        raise
+            elif "resumen" in key or "inventory_count_res" in key:
+                # Always use the standalone resumen implementation to ensure it includes the updated columns
+                try:
+                    import ui_pdf_report_resumen as rpt_res
+                    rpt_res.generate_pdf_report_diferencias_resumen(root, db_path=DB_NAME)
+                except Exception:
+                    # fallback: try the loaded module's implementation if resumen module fails
+                    fn = getattr(rpt, "generate_pdf_report_diferencias_resumen", None)
+                    if fn is not None:
+                        fn(root, db_path=DB_NAME)
+                    else:
+                        raise
             elif "diferenciaitemdetalle" in key or "itemdetalle" in key:
                 rpt.generate_pdf_report_diferencias_item_detalle(root, db_path=DB_NAME)
             elif "diferencias" in key:
@@ -916,12 +967,47 @@ def main():
     btn_rpt_main.grid(row=23, column=2, padx=6, pady=8, sticky="w")
 
     # Botón para generar reporte PDF (usa ui_pdf_report.add_pdf_report_button)
-    from ui_pdf_report import add_pdf_report_button, add_pdf_report_por_deposito_button, add_pdf_report_por_contador_button, add_pdf_report_diferencias_button, add_pdf_report_diferencias_por_item_button
-    btn_pdf = add_pdf_report_button(frm, db_path=DB_NAME, button_text="Generar PDF")
+    # Try to load the main reports module; if it's broken, prefer the small resumen module.
     try:
-        btn_pdf.grid(row=24, column=2, pady=8)
+        import ui_pdf_report as rpt_mod
     except Exception:
-        pass
+        try:
+            import ui_pdf_report_resumen as rpt_mod
+        except Exception:
+            rpt_mod = None
+
+    def _missing_btn_factory(msg="Reporte no disponible"):
+        def _create(parent, **kwargs):
+            btn = ttk.Button(parent, text=kwargs.get('button_text', 'Reporte'), command=lambda: messagebox.showerror('Error', msg, parent=root))
+            return btn
+        return _create
+
+    if rpt_mod is None:
+        add_pdf_report_button = _missing_btn_factory('No se pudo cargar el módulo de reportes')
+        add_pdf_report_por_deposito_button = add_pdf_report_button
+        add_pdf_report_por_contador_button = add_pdf_report_button
+        add_pdf_report_diferencias_button = add_pdf_report_button
+        add_pdf_report_diferencias_por_item_button = add_pdf_report_button
+    else:
+        add_pdf_report_button = getattr(rpt_mod, 'add_pdf_report_button', None)
+        add_pdf_report_por_deposito_button = getattr(rpt_mod, 'add_pdf_report_por_deposito_button', add_pdf_report_button)
+        add_pdf_report_por_contador_button = getattr(rpt_mod, 'add_pdf_report_por_contador_button', add_pdf_report_button)
+        add_pdf_report_diferencias_button = getattr(rpt_mod, 'add_pdf_report_diferencias_button', add_pdf_report_button)
+        add_pdf_report_diferencias_por_item_button = getattr(rpt_mod, 'add_pdf_report_diferencias_por_item_button', add_pdf_report_button)
+
+    try:
+        btn_pdf = add_pdf_report_button(frm, db_path=DB_NAME, button_text="Generar PDF")
+        try:
+            btn_pdf.grid(row=24, column=2, pady=8)
+        except Exception:
+            pass
+    except Exception:
+        # If creation fails, create a placeholder that shows an error when clicked
+        btn_pdf = ttk.Button(frm, text="Generar PDF", command=lambda: messagebox.showerror('Error', 'Reporte no disponible', parent=root))
+        try:
+            btn_pdf.grid(row=24, column=2, pady=8)
+        except Exception:
+            pass
 
     # Botón para reporte por depósito
     btn_pdf_deposito = add_pdf_report_por_deposito_button(frm, db_path=DB_NAME, button_text="Reporte por Depósito")
@@ -947,6 +1033,20 @@ def main():
             pass
     except Exception:
         # if import fails, ignore
+        pass
+
+    # Botón reporte Verificación (solo con remarks)
+    try:
+        try:
+            from ui_pdf_report_resumen import add_pdf_report_verificacion_remarks_button as add_pdf_report_verificacion_remarks_button
+        except Exception:
+            from ui_pdf_report import add_pdf_report_verificacion_remarks_button
+        btn_pdf_verif_r = add_pdf_report_verificacion_remarks_button(frm, db_path=DB_NAME, button_text="Verificación (Remarks)")
+        try:
+            btn_pdf_verif_r.grid(row=27, column=3, pady=8)
+        except Exception:
+            pass
+    except Exception:
         pass
 
     # Botón reporte de diferencias (por item y ubicación)
@@ -983,6 +1083,19 @@ def main():
         btn_pdf_diff_counter = add_pdf_report_diferencias_por_counter_button(frm, db_path=DB_NAME, button_text="Diferencias por Counter/Loc/Item")
         try:
             btn_pdf_diff_counter.grid(row=31, column=2, pady=8)
+        except Exception:
+            pass
+        # Button for differences summary from inventory_count_res
+        try:
+            try:
+                from ui_pdf_report_resumen import add_pdf_report_diferencias_resumen_button as add_pdf_report_diferencias_resumen_button
+            except Exception:
+                from ui_pdf_report import add_pdf_report_diferencias_resumen_button as add_pdf_report_diferencias_resumen_button
+            btn_pdf_diff_resum = add_pdf_report_diferencias_resumen_button(frm, db_path=DB_NAME, button_text="Diferencias Resumen")
+            try:
+                btn_pdf_diff_resum.grid(row=33, column=2, pady=8)
+            except Exception:
+                pass
         except Exception:
             pass
         # Button for detailed differences per item (asks for item code)

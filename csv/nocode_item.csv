@@ -1,0 +1,7 @@
+﻿Id,counter_name,deposit_id,rack_id,Location,count_date,code_item,references,boxqty,boxunitqty,boxunittotal,magazijn,winkel,total,remarks
+1,MALINA,1,14,Deposit N1- B2,1/26/2026,,REMA 212430 BI-METALLIC TOP-OFF\,1,4,4,0,0,4,MALINA D1 ***
+2,MALINA,1,27,Deposit N1- C3,1/26/2026,,CELLPACK NR 145 825,9,0,0,10,0,10,MALINA D1 ***
+3,MALINA,2,15,Deposit N2 - B3,1/28/2026, ,,0,1,0,19,0,19,MALINA D2 CODIGO ???***
+4,MALINA,4,32,Deposit N4 - C8,2/5/2026,,,6,2,12,2,0,14,MALINA D4 No tiene codigo ***
+5,MALINA,4,28,Deposit N4 - C4,2/5/2026,,,0,27,0,0,0,0,MALINA D4 Sin Codigo TAPA #29 ***
+6,MALINA,2,15,Deposit N2 - B3,2/16/2026,,,,,,19,,,

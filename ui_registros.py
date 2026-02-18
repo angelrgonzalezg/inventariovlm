@@ -429,8 +429,8 @@ def mostrar_registros(root):
             return
         deposit_name = edit_deposit.get()
         rack_name = edit_rack.get()
-        if not deposit_name or not rack_name:
-            messagebox.showerror("Error", "Selecciona Deposit y Rack")
+        if not deposit_name:
+            messagebox.showerror("Error", "Selecciona Deposit")
             return
         deposit_id = None
         rack_id = None
@@ -518,9 +518,17 @@ def mostrar_registros(root):
             except Exception:
                 rack_id = None
 
-        if deposit_id is None or rack_id is None:
-            messagebox.showerror("Error", f"Depósito o Rack inválido (deposit: {deposit_name} -> {deposit_id}, rack: {rack_name} -> {rack_id})")
+        if deposit_id is None:
+            messagebox.showerror("Error", f"Depósito inválido (deposit: {deposit_name} -> {deposit_id})")
             return
+        # If rack_id couldn't be resolved, allow storing NULL or numeric string
+        if rack_id is None:
+            # try interpreting the rack_name as an id (user may have pasted numeric id)
+            try:
+                rack_id = int(rack_name_norm)
+            except Exception:
+                # leave as None (will be stored as NULL)
+                rack_id = None
         conn = sqlite3.connect(DB_NAME)
         cur = conn.cursor()
         cur.execute("SELECT current_inventory FROM items WHERE code_item = ?", (code,))
@@ -585,6 +593,7 @@ def mostrar_registros(root):
         "Reporte Verificaion",
         "Reporte Diferencias",
         "Diferencias por Items",
+        "Diferencias Resumen (inventory_count_res)",
         "Diferencias > X",
         "Diferencias por Couneter/Loc/Item",
         "Diferencia Item Detalle",
@@ -601,8 +610,11 @@ def mostrar_registros(root):
         try:
             import ui_pdf_report as rpt
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo cargar los reportes: {e}", parent=win)
-            return
+            try:
+                import ui_pdf_report_resumen as rpt
+            except Exception:
+                messagebox.showerror("Error", f"No se pudo cargar los reportes: {e}", parent=win)
+                return
 
         try:
             if "deposito" in key and "por" in key:
@@ -617,6 +629,16 @@ def mostrar_registros(root):
                 rpt.generate_pdf_report_diferencias_por_counter(win, db_path=DB_NAME)
             elif "diferenciasporitems" in key or "poritem" in key:
                 rpt.generate_pdf_report_diferencias_por_item(win, db_path=DB_NAME)
+            elif "resumen" in key or "inventory_count_res" in key:
+                fn = getattr(rpt, "generate_pdf_report_diferencias_resumen", None)
+                if fn is not None:
+                    fn(win, db_path=DB_NAME)
+                else:
+                    try:
+                        import ui_pdf_report_resumen as rpt_res
+                        rpt_res.generate_pdf_report_diferencias_resumen(win, db_path=DB_NAME)
+                    except Exception:
+                        raise
             elif "diferenciaitemdetalle" in key or "itemdetalle" in key:
                 rpt.generate_pdf_report_diferencias_item_detalle(win, db_path=DB_NAME)
             elif "diferencias" in key:
@@ -628,9 +650,33 @@ def mostrar_registros(root):
             messagebox.showerror("Error", f"Error al ejecutar el reporte: {e}", parent=win)
 
     btn_rpt_exec = ttk.Button(frm, text="Ejecutar reporte", command=ejecutar_reporte)
+    def _run_resumen():
+        try:
+            try:
+                mod = __import__('ui_pdf_report')
+                fn = getattr(mod, 'generate_pdf_report_diferencias_resumen', None)
+            except Exception:
+                try:
+                    mod = __import__('ui_pdf_report_resumen')
+                    fn = getattr(mod, 'generate_pdf_report_diferencias_resumen', None)
+                except Exception:
+                    fn = None
+            if fn is None:
+                messagebox.showerror("Error", "Función de reporte 'generate_pdf_report_diferencias_resumen' no encontrada", parent=win)
+                return
+            fn(win, db_path=DB_NAME)
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al ejecutar reporte resumen: {e}", parent=win)
+
+    btn_rpt_resum = ttk.Button(frm, text="Diferencias Resumen", command=_run_resumen)
     lbl_rpt.grid(row=1, column=7, padx=6, pady=2)
     cmb_rpt.grid(row=1, column=8, padx=6, pady=2)
     btn_rpt_exec.grid(row=1, column=9, padx=6, pady=2)
+    # place the resumen button to the right of Ejecutar
+    try:
+        btn_rpt_resum.grid(row=1, column=10, padx=6, pady=2)
+    except Exception:
+        btn_rpt_resum.pack(padx=6, pady=2)
 
     # Mostrar los datos al abrir la ventana
     cargar_datos()

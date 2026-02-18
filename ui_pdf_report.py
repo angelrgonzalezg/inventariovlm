@@ -122,6 +122,10 @@ def add_pdf_report_diferencias_por_counter_button(parent_frame, db_path: str = D
     return _make_button(parent_frame, row=30, text=button_text, command=lambda: generate_pdf_report_diferencias_por_counter(parent_frame, db_path))
 
 
+def add_pdf_report_diferencias_resumen_button(parent_frame, db_path: str = DEFAULT_DB, button_text: str = "Diferencias Resumen"):
+    return _make_button(parent_frame, row=33, text=button_text, command=lambda: _invoke_report_by_name('generate_pdf_report_diferencias_resumen', parent_frame, db_path))
+
+
 # ----------------- Report generators -----------------
 
 
@@ -348,20 +352,105 @@ def generate_pdf_report_por_contador(parent, db_path: str = DEFAULT_DB):
                 table.setStyle(tbl_style)
                 story.append(table)
                 story.append(Spacer(1, 8))
-        if ci < len(grouped) - 1:
-            story.append(PageBreak())
 
-    if not grouped:
-        story.append(Paragraph("No hay registros para reportar.", normal))
+
+def generate_pdf_report_diferencias_resumen(parent, db_path: str = DEFAULT_DB):
+    """Generate a PDF from `inventory_count_res` showing key columns and absolute difference.
+
+    Columns shown: code_item, description_item, total, sales_qty, purchasing_qty, total_calc, |difference|.
+    Orders rows by absolute difference descending.
+    """
+    file_path = _asksave(parent)
+    if not file_path:
+        return
+    if not _ensure_reportlab(parent):
+        return
+    if not os.path.exists(db_path):
+        messagebox.showerror("Error", f"No se encontró la base de datos: {db_path}", parent=parent)
+        return
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(inventory_count_res)")
+        cols = [c[1] for c in cur.fetchall()]
+
+        sel_cols = ['code_item']
+        sel_cols.append('description_item' if 'description_item' in cols else "'' AS description_item")
+        sel_cols.append('total' if 'total' in cols else '0 AS total')
+        sel_cols.append('sales_qty' if 'sales_qty' in cols else '0 AS sales_qty')
+        sel_cols.append('purchasing_qty' if 'purchasing_qty' in cols else '0 AS purchasing_qty')
+        sel_cols.append('total_calc' if 'total_calc' in cols else '0 AS total_calc')
+
+        if 'difference' in cols:
+            diff_expr = 'difference'
+        elif 'total_calc' in cols and 'current_inventory' in cols:
+            diff_expr = '(current_inventory - total_calc)'
+        elif 'total' in cols and 'current_inventory' in cols:
+            diff_expr = '(current_inventory - total)'
+        else:
+            diff_expr = '0'
+
+        sql = f"SELECT {', '.join(sel_cols)}, {diff_expr} AS difference FROM inventory_count_res ORDER BY ABS({diff_expr}) DESC"
+        cur.execute(sql)
+        rows = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al leer la base de datos: {e}", parent=parent)
+        return
+
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    styles = getSampleStyleSheet()
+    title_style = styles['Heading1']
+    normal = styles['Normal']
+
+    doc = SimpleDocTemplate(file_path, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+    story = []
+    story.append(Paragraph('Reporte Diferencias - Resumen (inventory_count_res)', title_style))
+    story.append(Spacer(1, 8))
+
+    headers = ['Código', 'Descripción', 'Total', 'Sales', 'Purchasing', 'Total_calc', 'Diferencia']
+    data = [headers]
+    for r in rows:
+        data.append([
+            r[0] or '',
+            (r[1] or '')[:200],
+            str(r[2] or 0),
+            str(r[3] or 0),
+            str(r[4] or 0),
+            str(r[5] or 0),
+            str(abs(r[6] or 0))
+        ])
+
+    if len(data) == 1:
+        story.append(Paragraph('No hay registros para reportar.', normal))
+    else:
+        table = Table(data, repeatRows=1, hAlign='LEFT', colWidths=[80, 360, 60, 60, 60, 60, 60])
+        tbl_style = TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d3d3d3')),
+            ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ])
+        table.setStyle(tbl_style)
+        story.append(table)
 
     try:
         doc.build(story)
     except Exception as e:
-        messagebox.showerror("Error", f"Error al generar el PDF: {e}", parent=parent)
+        messagebox.showerror('Error', f'Error al generar el PDF: {e}', parent=parent)
         return
 
     _open_pdf_file(file_path, parent=parent)
-    messagebox.showinfo("OK", f"Reporte PDF generado: {file_path}", parent=parent)
+    messagebox.showinfo('OK', f'Reporte PDF generado: {file_path}', parent=parent)
+    
 
 
 def generate_pdf_report_por_deposito(parent, db_path: str = DEFAULT_DB):
@@ -664,6 +753,23 @@ def add_pdf_report_button(parent_frame, db_path=DEFAULT_DB, button_text="Generar
         # if grid not appropriate, pack
         btn.pack(pady=8)
     return btn
+
+
+def _invoke_report_by_name(func_name: str, parent: object, db_path: str):
+    """Import the ui_pdf_report module and invoke a report function by name.
+
+    Shows an error message if the function is not found or call fails.
+    """
+    try:
+        mod = __import__(__name__)
+        fn = getattr(mod, func_name, None)
+        if fn is None:
+            messagebox.showerror("Error", f"No se encontró la función de reporte: {func_name}", parent=parent)
+            return
+        return fn(parent, db_path=db_path)
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al ejecutar el reporte {func_name}: {e}", parent=parent)
+        return
 
 def generate_pdf_report(parent, db_path=DEFAULT_DB):
     """
@@ -1112,6 +1218,15 @@ def generate_pdf_report_diferencias_por_item(parent, db_path: str = DEFAULT_DB):
         ])
         table.setStyle(tbl_style)
         story.append(table)
+
+    try:
+        doc.build(story)
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al generar el PDF: {e}", parent=parent)
+        return
+
+    _open_pdf_file(file_path, parent=parent)
+    messagebox.showinfo("OK", f"Reporte PDF generado: {file_path}", parent=parent)
 
 
 def generate_pdf_report_diferencias_item_detalle(parent, db_path: str = DEFAULT_DB):

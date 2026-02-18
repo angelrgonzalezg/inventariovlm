@@ -99,16 +99,22 @@ def resolve(deposit_name, rack_name):
 if __name__ == '__main__':
     deps = get_deposits()
     print('Deposits (sample):', deps[:5])
-    if deps:
-        first_dep_name = deps[0][1] if isinstance(deps[0], (list,tuple)) and len(deps[0])>1 else deps[0]
-        dep_id = deps[0][0] if isinstance(deps[0], (list,tuple)) else None
-        racks = get_racks()(dep_id) if dep_id is not None else []
-        print('Racks for first deposit:', racks[:5])
-        if racks:
-            first_rack_name = racks[0][1] if isinstance(racks[0], (list,tuple)) and len(racks[0])>1 else racks[0]
-        else:
-            first_rack_name = ''
-        resolved = resolve(first_dep_name, first_rack_name)
-        print(f"Resolve('{first_dep_name}','{first_rack_name}') -> {resolved}")
-    else:
-        print('No deposits found')
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+    rows = cur.execute('SELECT id, deposit_id, rack_id, code_item FROM inventory_count LIMIT 20').fetchall()
+    print('\nTesting resolution on inventory_count sample rows:')
+    for r in rows:
+        row_id, dep_id, rack_id, code = r
+        dep_desc = ''
+        rack_desc = ''
+        if dep_id is not None:
+            rr = cur.execute('SELECT deposit_description FROM deposits WHERE deposit_id = ?', (dep_id,)).fetchone()
+            if rr:
+                dep_desc = rr[0]
+        if rack_id is not None:
+            rr = cur.execute('SELECT rack_description FROM racks WHERE rack_id = ?', (rack_id,)).fetchone()
+            if rr:
+                rack_desc = rr[0]
+        resolved = resolve(dep_desc, rack_desc)
+        print(f'row id={row_id} code={code} stored dep_id={dep_id} dep_desc="{dep_desc}" stored rack_id={rack_id} rack_desc="{rack_desc}" -> resolved {resolved}')
+    conn.close()
