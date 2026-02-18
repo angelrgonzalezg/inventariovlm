@@ -101,7 +101,7 @@ def mostrar_registros(root):
             for row in rows:
                 tree.insert("", "end", values=row)
         except Exception as e:
-            messagebox.showerror("Error de consulta", f"No se pudo cargar registros: {e}")
+            messagebox.showerror("Error de consulta", f"No se pudo cargar registros: {e}", parent=win)
         finally:
             conn.close()
 
@@ -413,7 +413,7 @@ def mostrar_registros(root):
     def actualizar_registro():
         sel = tree.focus()
         if not sel:
-            messagebox.showerror("Error", "Selecciona un registro")
+            messagebox.showerror("Error", "Selecciona un registro", parent=win)
             return
         id_reg = tree.item(sel, "values")[0]
         counter = edit_counter.get().strip()
@@ -425,12 +425,12 @@ def mostrar_registros(root):
             magazijn = int(edit_mag.get() or 0)
             winkel = int(edit_win.get() or 0)
         except ValueError:
-            messagebox.showerror("Error", "Magazijn y Winkel deben ser números enteros")
+            messagebox.showerror("Error", "Magazijn y Winkel deben ser números enteros", parent=win)
             return
         deposit_name = edit_deposit.get()
         rack_name = edit_rack.get()
         if not deposit_name:
-            messagebox.showerror("Error", "Selecciona Deposit")
+            messagebox.showerror("Error", "Selecciona Deposit", parent=win)
             return
         deposit_id = None
         rack_id = None
@@ -535,7 +535,7 @@ def mostrar_registros(root):
         item_row = cur.fetchone()
         if not item_row:
             conn.close()
-            messagebox.showerror("Error", "Código no válido en items")
+            messagebox.showerror("Error", "Código no válido en items", parent=win)
             return
         current_inv = item_row[0]
         # derived quantities
@@ -553,15 +553,15 @@ def mostrar_registros(root):
         conn.close()
         # keep current filter if any
         cargar_datos(filter_code=edit_filter.get().strip() or None)
-        messagebox.showinfo("OK", "Registro actualizado")
+        messagebox.showinfo("OK", "Registro actualizado", parent=win)
 
     def eliminar_registro():
         sel = tree.focus()
         if not sel:
-            messagebox.showerror("Error", "Selecciona un registro")
+            messagebox.showerror("Error", "Selecciona un registro", parent=win)
             return
         id_reg = tree.item(sel, "values")[0]
-        if not messagebox.askyesno("Confirmar", "¿Eliminar este registro?"):
+        if not messagebox.askyesno("Confirmar", "¿Eliminar este registro?", parent=win):
             return
         conn = sqlite3.connect(DB_NAME)
         cur = conn.cursor()
@@ -576,7 +576,7 @@ def mostrar_registros(root):
                     w.config(state="readonly")
             except Exception:
                 pass
-        messagebox.showinfo("OK", "Registro eliminado")
+        messagebox.showinfo("OK", "Registro eliminado", parent=win)
 
     # Botones de acción: Actualizar, Eliminar, Cerrar (creados aquí tras definir las funciones)
     btn_update = ttk.Button(frm, text="Actualizar", command=actualizar_registro)
@@ -711,7 +711,7 @@ def mostrar_registros_resumen(root):
             for row in rows:
                 tree.insert("", "end", values=row)
         except Exception as e:
-            messagebox.showerror("Error de consulta", f"No se pudo cargar registros resumen: {e}")
+            messagebox.showerror("Error de consulta", f"No se pudo cargar registros resumen: {e}", parent=win)
         finally:
             conn.close()
 
@@ -875,7 +875,7 @@ def mostrar_registros_resumen(root):
     def actualizar_registro():
         sel = tree.focus()
         if not sel:
-            messagebox.showerror("Error", "Selecciona un registro")
+            messagebox.showerror("Error", "Selecciona un registro", parent=win)
             return
         id_reg = tree.item(sel, "values")[0]
         code = edit_code.get().strip()
@@ -886,7 +886,7 @@ def mostrar_registros_resumen(root):
             magazijn = int(edit_mag.get() or 0)
             winkel = int(edit_win.get() or 0)
         except ValueError:
-            messagebox.showerror("Error", "Magazijn y Winkel deben ser números enteros")
+            messagebox.showerror("Error", "Magazijn y Winkel deben ser números enteros", parent=win)
             return
         boxunittotal = boxqty * boxunitqty
         total = boxunittotal + magazijn + winkel
@@ -901,18 +901,18 @@ def mostrar_registros_resumen(root):
             conn.commit()
             conn.close()
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo actualizar registro resumen: {e}")
+            messagebox.showerror("Error", f"No se pudo actualizar registro resumen: {e}", parent=win)
             return
         cargar_datos(filter_code=edit_filter.get().strip() or None)
-        messagebox.showinfo("OK", "Registro actualizado")
+        messagebox.showinfo("OK", "Registro actualizado", parent=win)
 
     def eliminar_registro():
         sel = tree.focus()
         if not sel:
-            messagebox.showerror("Error", "Selecciona un registro")
+            messagebox.showerror("Error", "Selecciona un registro", parent=win)
             return
         id_reg = tree.item(sel, "values")[0]
-        if not messagebox.askyesno("Confirmar", "¿Eliminar este registro resumen?"):
+        if not messagebox.askyesno("Confirmar", "¿Eliminar este registro resumen?", parent=win):
             return
         try:
             conn = sqlite3.connect(DB_NAME)
@@ -921,7 +921,7 @@ def mostrar_registros_resumen(root):
             conn.commit()
             conn.close()
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo eliminar registro resumen: {e}")
+            messagebox.showerror("Error", f"No se pudo eliminar registro resumen: {e}", parent=win)
             return
         cargar_datos()
         for w in (edit_code, edit_desc, edit_boxqty, edit_boxunitqty, edit_boxunittotal, edit_mag, edit_win, edit_total, edit_current, edit_diff, edit_updated):
@@ -931,7 +931,7 @@ def mostrar_registros_resumen(root):
                     w.config(state="readonly")
             except Exception:
                 pass
-        messagebox.showinfo("OK", "Registro eliminado")
+        messagebox.showinfo("OK", "Registro eliminado", parent=win)
 
     # Botones de acción
     btn_update = ttk.Button(frm, text="Actualizar", command=actualizar_registro)

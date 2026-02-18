@@ -1263,12 +1263,13 @@ def main():
         conn = sqlite3.connect(DB_NAME)
         try:
             df = pd.read_sql_query("""
-                SELECT c.id, c.counter_name, c.code_item,
-                       COALESCE(i.description_item, '') AS description_item,
-                       c.boxqty, c.boxunitqty, c.boxunittotal,
-                       c.magazijn, c.winkel, c.total, c.current_inventory, c.difference,
-                       d.deposit_description AS deposit_name, r.rack_description AS rack_name,
-                       c.location, c.count_date
+                  SELECT c.id, c.counter_name, c.code_item,
+                      COALESCE(i.description_item, '') AS description_item,
+                      c.boxqty, c.boxunitqty, c.boxunittotal,
+                      c.magazijn, c.winkel, c.total, c.current_inventory, c.difference,
+                      c.remarks,
+                      d.deposit_description AS deposit_name, r.rack_description AS rack_name,
+                      c.location, c.count_date
                 FROM inventory_count c
                 LEFT JOIN items i ON i.code_item = c.code_item
                 LEFT JOIN deposits d ON d.deposit_id = c.deposit_id
