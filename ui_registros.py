@@ -434,22 +434,92 @@ def mostrar_registros(root):
             return
         deposit_id = None
         rack_id = None
+        dep_name_norm = deposit_name.strip() if isinstance(deposit_name, str) else deposit_name
+        rack_name_norm = rack_name.strip() if isinstance(rack_name, str) else rack_name
+
+        # Try to resolve deposit_id from the in-memory list (robust to different tuple shapes)
         for d in deposits_list:
-            if d[1] == deposit_name:
-                deposit_id = d[0]
-                break
+            try:
+                if isinstance(d, (list, tuple)):
+                    # common shapes: (id, description) or (id, number, description)
+                    if len(d) >= 2 and str(d[1]).strip() == str(dep_name_norm):
+                        deposit_id = d[0]
+                        break
+                    if len(d) >= 3 and str(d[2]).strip() == str(dep_name_norm):
+                        deposit_id = d[0]
+                        break
+                    # allow matching if user pasted an id into the combobox
+                    if str(d[0]).strip() == str(dep_name_norm):
+                        deposit_id = d[0]
+                        break
+                else:
+                    if str(d).strip() == str(dep_name_norm):
+                        # single-value list case: we need to lookup id from DB
+                        deposit_id = None
+                        break
+            except Exception:
+                continue
+
+        # Try to resolve rack_id from the in-memory racks_list
         for r in racks_list:
-            if isinstance(r, (list, tuple)) and len(r) > 1:
-                if r[1] == rack_name:
-                    rack_id = r[0]
-                    break
-            else:
-                if str(r) == str(rack_name):
-                    # if rack list contains simple values, use that value as id
-                    rack_id = r
-                    break
+            try:
+                if isinstance(r, (list, tuple)) and len(r) > 1:
+                    if str(r[1]).strip() == str(rack_name_norm):
+                        rack_id = r[0]
+                        break
+                    if str(r[0]).strip() == str(rack_name_norm):
+                        rack_id = r[0]
+                        break
+                else:
+                    if str(r).strip() == str(rack_name_norm):
+                        rack_id = r
+                        break
+            except Exception:
+                continue
+
+        # Fallback: if not found in memory, try DB lookup by description (more tolerant)
+        if deposit_id is None:
+            try:
+                cur2 = sqlite3.connect(DB_NAME).cursor()
+                cur2.execute("SELECT deposit_id FROM deposits WHERE deposit_description = ? COLLATE NOCASE LIMIT 1", (dep_name_norm,))
+                rr = cur2.fetchone()
+                if rr:
+                    deposit_id = rr[0]
+                else:
+                    # try matching by number or trimmed description
+                    cur2.execute("SELECT deposit_id FROM deposits WHERE deposit_number = ? LIMIT 1", (dep_name_norm,))
+                    rr = cur2.fetchone()
+                    if rr:
+                        deposit_id = rr[0]
+                try:
+                    cur2.connection.close()
+                except Exception:
+                    pass
+            except Exception:
+                deposit_id = None
+
+        if rack_id is None:
+            try:
+                cur3 = sqlite3.connect(DB_NAME).cursor()
+                if deposit_id is not None:
+                    cur3.execute("SELECT rack_id FROM racks WHERE rack_description = ? AND deposit_id = ? COLLATE NOCASE LIMIT 1", (rack_name_norm, deposit_id))
+                    rr = cur3.fetchone()
+                    if rr:
+                        rack_id = rr[0]
+                if rack_id is None:
+                    cur3.execute("SELECT rack_id FROM racks WHERE rack_description = ? COLLATE NOCASE LIMIT 1", (rack_name_norm,))
+                    rr = cur3.fetchone()
+                    if rr:
+                        rack_id = rr[0]
+                try:
+                    cur3.connection.close()
+                except Exception:
+                    pass
+            except Exception:
+                rack_id = None
+
         if deposit_id is None or rack_id is None:
-            messagebox.showerror("Error", "Depósito o Rack inválido")
+            messagebox.showerror("Error", f"Depósito o Rack inválido (deposit: {deposit_name} -> {deposit_id}, rack: {rack_name} -> {rack_id})")
             return
         conn = sqlite3.connect(DB_NAME)
         cur = conn.cursor()

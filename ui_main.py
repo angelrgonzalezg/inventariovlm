@@ -752,7 +752,34 @@ def main():
             if clear:
                 cur.execute("DELETE FROM inventory_count_res")
 
-            # Aggregate values from inventory_count
+            # Ensure sales_qty and purchasing_qty columns exist in inventory_count_res
+            try:
+                cur.execute("PRAGMA table_info(inventory_count_res)")
+                cols_info = cur.fetchall()
+                cols = [c[1] for c in cols_info]
+            except Exception:
+                cols = []
+            if 'sales_qty' not in cols:
+                try:
+                    cur.execute("ALTER TABLE inventory_count_res ADD COLUMN sales_qty INTEGER DEFAULT 0")
+                except Exception:
+                    pass
+            if 'purchasing_qty' not in cols:
+                try:
+                    cur.execute("ALTER TABLE inventory_count_res ADD COLUMN purchasing_qty INTEGER DEFAULT 0")
+                except Exception:
+                    pass
+            # Re-query columns to detect if total_calc exists
+            try:
+                cur.execute("PRAGMA table_info(inventory_count_res)")
+                cols_info = cur.fetchall()
+                cols = [c[1] for c in cols_info]
+            except Exception:
+                cols = []
+            has_total_calc = 'total_calc' in cols
+
+            # Aggregate values from inventory_count, and also include sales and purchasing sums by code_item
+            # sales and purchasing are expected to be tables with at least (code_item, qty)
             cur.execute('''
                 SELECT ic.code_item AS code_item,
                        COALESCE(SUM(ic.boxqty),0) AS boxqty,
@@ -762,9 +789,17 @@ def main():
                        COALESCE(SUM(ic.winkel),0) AS winkel,
                        COALESCE(SUM(ic.total),0) AS total,
                        MAX(COALESCE(i.description_item, '')) AS description_item,
-                       MAX(COALESCE(i.current_inventory,0)) AS current_inventory
+                       MAX(COALESCE(i.current_inventory,0)) AS current_inventory,
+                       COALESCE(s.sales_qty, 0) AS sales_qty,
+                       COALESCE(p.purchasing_qty, 0) AS purchasing_qty
                   FROM inventory_count ic
                   LEFT JOIN items i ON i.code_item = ic.code_item
+                  LEFT JOIN (
+                      SELECT code_item, SUM(sales_qty) AS sales_qty FROM sales GROUP BY code_item
+                  ) s ON s.code_item = ic.code_item
+                  LEFT JOIN (
+                      SELECT code_item, SUM(purchasing_qty) AS purchasing_qty FROM purchasing GROUP BY code_item
+                  ) p ON p.code_item = ic.code_item
                  GROUP BY ic.code_item
             ''')
             rows = cur.fetchall()
@@ -785,14 +820,26 @@ def main():
                 total = int(r[6] or 0)
                 description_item = r[7] or ''
                 current_inventory = int(r[8] or 0)
-                difference = current_inventory - total
+                # compute sales/purchasing and derived total_calc and difference
+                sales_qty = int(r[9] or 0)
+                purchasing_qty = int(r[10] or 0)
+                total_calc = total + purchasing_qty - sales_qty
+                difference = current_inventory - total_calc
 
-                cur.execute(
-                    '''INSERT INTO inventory_count_res
-                       (code_item, description_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, updated_date)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
-                    (code_item, description_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, ts)
-                )
+                if has_total_calc:
+                    cur.execute(
+                        '''INSERT INTO inventory_count_res
+                           (code_item, description_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, sales_qty, purchasing_qty, total_calc, updated_date)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                        (code_item, description_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, sales_qty, purchasing_qty, total_calc, ts)
+                    )
+                else:
+                    cur.execute(
+                        '''INSERT INTO inventory_count_res
+                           (code_item, description_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, sales_qty, purchasing_qty, updated_date)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                        (code_item, description_item, boxqty, boxunitqty, boxunittotal, magazijn, winkel, total, current_inventory, difference, sales_qty, purchasing_qty, ts)
+                    )
                 inserted += 1
 
             conn.commit()
