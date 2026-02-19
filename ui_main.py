@@ -495,6 +495,53 @@ def main():
     frm = ttk.Frame(root, padding=10)
     frm.pack(fill="both", expand=True)
 
+    # Try to load company logo and show it at top-right of the window
+    try:
+        logo_path_candidates = [
+            os.path.join(_base_dir, 'icons', 'cj_electrical_supplies.png'),
+            r'C:\Python\Python_Projects\inventariovlm\icons\cj_electrical_supplies.png'
+        ]
+        logo_path = None
+        for p in logo_path_candidates:
+            if p and os.path.exists(p):
+                logo_path = p
+                break
+
+        logo_img = None
+        if logo_path:
+            try:
+                from PIL import Image, ImageTk
+                img = Image.open(logo_path)
+                # Resize to a reasonable header size while keeping aspect
+                img.thumbnail((160, 80), Image.ANTIALIAS)
+                logo_img = ImageTk.PhotoImage(img)
+            except Exception:
+                try:
+                    # Fallback to Tk's PhotoImage (works if Tk supports PNG)
+                    logo_img = tk.PhotoImage(file=logo_path)
+                except Exception:
+                    logo_img = None
+
+        if logo_img:
+            lbl_logo = ttk.Label(frm, image=logo_img)
+            lbl_logo.image = logo_img
+            # place in the top-right corner of the frame
+            try:
+                lbl_logo.place(relx=1.0, x=-8, y=8, anchor='ne')
+            except Exception:
+                # final fallback: grid at a high column index
+                try:
+                    lbl_logo.grid(row=0, column=4, rowspan=2, sticky='ne')
+                except Exception:
+                    pass
+            # keep reference on root so it doesn't get GC'd
+            try:
+                root._logo_img = logo_img
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     btn_importar_inventory = ttk.Button(frm, text="Importar Inventory", command=importar_inventory)
     btn_importar_inventory.grid(row=22, column=0, pady=8)
     btn_importar_consolidado = ttk.Button(frm, text="Importar Consolidado CSV", command=importar_consolidado_csv)
