@@ -437,15 +437,16 @@ def mostrar_registros(root):
         dep_name_norm = deposit_name.strip() if isinstance(deposit_name, str) else deposit_name
         rack_name_norm = rack_name.strip() if isinstance(rack_name, str) else rack_name
 
-        # Try to resolve deposit_id from the in-memory list (robust to different tuple shapes)
+        # Try to resolve deposit_id from the in-memory list (case-insensitive)
         for d in deposits_list:
             try:
                 if isinstance(d, (list, tuple)):
-                    # common shapes: (id, description) or (id, number, description)
-                    if len(d) >= 2 and str(d[1]).strip() == str(dep_name_norm):
+                    # d[1] is usually the description
+                    if len(d) >= 2 and str(d[1]).strip().lower() == str(dep_name_norm).lower():
                         deposit_id = d[0]
                         break
-                    if len(d) >= 3 and str(d[2]).strip() == str(dep_name_norm):
+                    # support other tuple shapes where description may be at index 2
+                    if len(d) >= 3 and str(d[2]).strip().lower() == str(dep_name_norm).lower():
                         deposit_id = d[0]
                         break
                     # allow matching if user pasted an id into the combobox
@@ -453,31 +454,76 @@ def mostrar_registros(root):
                         deposit_id = d[0]
                         break
                 else:
-                    if str(d).strip() == str(dep_name_norm):
+                    if str(d).strip().lower() == str(dep_name_norm).lower():
                         # single-value list case: we need to lookup id from DB
                         deposit_id = None
                         break
             except Exception:
                 continue
 
-        # Try to resolve rack_id from the in-memory racks_list
-        for r in racks_list:
+        # Resolve rack_id primarily by querying the `racks` table (preferred over in-memory lists).
+        # Strategies tried: numeric id, exact with deposit, exact without deposit, startswith with deposit, LIKE without deposit.
+        try:
+            conn_r = sqlite3.connect(DB_NAME)
+            cur_r = conn_r.cursor()
+            # 1) numeric id
             try:
-                if isinstance(r, (list, tuple)) and len(r) > 1:
-                    if str(r[1]).strip() == str(rack_name_norm):
-                        rack_id = r[0]
-                        break
-                    if str(r[0]).strip() == str(rack_name_norm):
-                        rack_id = r[0]
-                        break
-                else:
-                    if str(r).strip() == str(rack_name_norm):
-                        rack_id = r
-                        break
+                cand = int(rack_name_norm)
+                cur_r.execute("SELECT rack_id FROM racks WHERE rack_id = ? LIMIT 1", (cand,))
+                rr = cur_r.fetchone()
+                if rr:
+                    rack_id = rr[0]
             except Exception:
-                continue
+                pass
 
-        # Fallback: if not found in memory, try DB lookup by description (more tolerant)
+            # 2) exact match with deposit
+            if rack_id is None and rack_name_norm and deposit_id is not None:
+                try:
+                    cur_r.execute("SELECT rack_id FROM racks WHERE rack_description = ? AND deposit_id = ? COLLATE NOCASE LIMIT 1", (rack_name_norm, deposit_id))
+                    rr = cur_r.fetchone()
+                    if rr:
+                        rack_id = rr[0]
+                except Exception:
+                    pass
+
+            # 3) exact match without deposit
+            if rack_id is None and rack_name_norm:
+                try:
+                    cur_r.execute("SELECT rack_id FROM racks WHERE rack_description = ? COLLATE NOCASE LIMIT 1", (rack_name_norm,))
+                    rr = cur_r.fetchone()
+                    if rr:
+                        rack_id = rr[0]
+                except Exception:
+                    pass
+
+            # 4) startswith within deposit
+            if rack_id is None and rack_name_norm and deposit_id is not None:
+                try:
+                    cur_r.execute("SELECT rack_id FROM racks WHERE rack_description LIKE ? AND deposit_id = ? LIMIT 1", (f"{rack_name_norm}%", deposit_id))
+                    rr = cur_r.fetchone()
+                    if rr:
+                        rack_id = rr[0]
+                except Exception:
+                    pass
+
+            # 5) LIKE fallback without deposit
+            if rack_id is None and rack_name_norm:
+                try:
+                    cur_r.execute("SELECT rack_id FROM racks WHERE rack_description LIKE ? LIMIT 1", (f"%{rack_name_norm}%",))
+                    rr = cur_r.fetchone()
+                    if rr:
+                        rack_id = rr[0]
+                except Exception:
+                    pass
+
+            try:
+                conn_r.close()
+            except Exception:
+                pass
+        except Exception:
+            rack_id = None
+
+        # Fallback: if deposit_id couldn't be determined earlier, resolve it from DB now
         if deposit_id is None:
             try:
                 cur2 = sqlite3.connect(DB_NAME).cursor()
@@ -498,28 +544,43 @@ def mostrar_registros(root):
             except Exception:
                 deposit_id = None
 
+        # Fallback: DB lookup for rack by description (case-insensitive), prefer same-deposit match
         if rack_id is None:
             try:
-                cur3 = sqlite3.connect(DB_NAME).cursor()
+                conn3 = sqlite3.connect(DB_NAME)
+                cur3 = conn3.cursor()
                 if deposit_id is not None:
                     cur3.execute("SELECT rack_id FROM racks WHERE rack_description = ? AND deposit_id = ? COLLATE NOCASE LIMIT 1", (rack_name_norm, deposit_id))
                     rr = cur3.fetchone()
                     if rr:
                         rack_id = rr[0]
                 if rack_id is None:
+                    # try exact match without deposit
                     cur3.execute("SELECT rack_id FROM racks WHERE rack_description = ? COLLATE NOCASE LIMIT 1", (rack_name_norm,))
                     rr = cur3.fetchone()
                     if rr:
                         rack_id = rr[0]
+                if rack_id is None:
+                    # try partial match
+                    if deposit_id is not None:
+                        cur3.execute("SELECT rack_id FROM racks WHERE rack_description LIKE ? AND deposit_id = ? LIMIT 1", (f"%{rack_name_norm}%", deposit_id))
+                        rr = cur3.fetchone()
+                        if rr:
+                            rack_id = rr[0]
+                    if rack_id is None:
+                        cur3.execute("SELECT rack_id FROM racks WHERE rack_description LIKE ? LIMIT 1", (f"%{rack_name_norm}%",))
+                        rr = cur3.fetchone()
+                        if rr:
+                            rack_id = rr[0]
                 try:
-                    cur3.connection.close()
+                    conn3.close()
                 except Exception:
                     pass
             except Exception:
                 rack_id = None
 
         if deposit_id is None:
-            messagebox.showerror("Error", f"Depósito inválido (deposit: {deposit_name} -> {deposit_id})")
+            messagebox.showerror("Error", f"Depósito inválido (deposit: {deposit_name} -> {deposit_id})", parent=win)
             return
         # If rack_id couldn't be resolved, allow storing NULL or numeric string
         if rack_id is None:
@@ -527,8 +588,55 @@ def mostrar_registros(root):
             try:
                 rack_id = int(rack_name_norm)
             except Exception:
-                # leave as None (will be stored as NULL)
                 rack_id = None
+
+        # If still None, try to extract rack from location (format: 'Deposit - Rack') and retry DB lookup
+        if rack_id is None:
+            loc_val = ''
+            try:
+                loc_val = edit_location.get().strip()
+            except Exception:
+                loc_val = ''
+            if not rack_name_norm and loc_val and ' - ' in loc_val:
+                candidate = loc_val.split(' - ', 1)[1].strip()
+                if candidate:
+                    rack_name_norm = candidate
+
+        # As a last-resort DB fuzzy search for rack_name
+        if rack_id is None and rack_name_norm:
+            try:
+                conn_f = sqlite3.connect(DB_NAME)
+                cur_f = conn_f.cursor()
+                # prefer same-deposit exact match (case-insensitive)
+                if deposit_id is not None:
+                    cur_f.execute("SELECT rack_id FROM racks WHERE rack_description = ? AND deposit_id = ? COLLATE NOCASE LIMIT 1", (rack_name_norm, deposit_id))
+                    rr = cur_f.fetchone()
+                    if rr:
+                        rack_id = rr[0]
+                if rack_id is None:
+                    # try startswith
+                    if deposit_id is not None:
+                        cur_f.execute("SELECT rack_id FROM racks WHERE rack_description LIKE ? AND deposit_id = ? LIMIT 1", (f"{rack_name_norm}%", deposit_id))
+                        rr = cur_f.fetchone()
+                        if rr:
+                            rack_id = rr[0]
+                    if rack_id is None:
+                        cur_f.execute("SELECT rack_id FROM racks WHERE rack_description LIKE ? LIMIT 1", (f"%{rack_name_norm}%",))
+                        rr = cur_f.fetchone()
+                        if rr:
+                            rack_id = rr[0]
+                try:
+                    conn_f.close()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        # DEBUG: print resolution results to help diagnose missing rack_id
+        try:
+            print(f"[ui_registros] actualizar_registro: id={id_reg} deposit_name={deposit_name!r} dep_id_resolved={deposit_id!r} rack_name={rack_name!r} rack_id_resolved={rack_id!r}")
+            print(f"[ui_registros] racks_list sample (first 6): {racks_list[:6]}")
+        except Exception:
+            pass
         conn = sqlite3.connect(DB_NAME)
         cur = conn.cursor()
         cur.execute("SELECT current_inventory FROM items WHERE code_item = ?", (code,))
@@ -544,6 +652,7 @@ def mostrar_registros(root):
         diff = total - current_inv
         location = f"{deposit_name} - {rack_name}"
         edit_location.config(state="normal"); edit_location.delete(0, tk.END); edit_location.insert(0, location); edit_location.config(state="readonly")
+        print(f"[ui_registros] executing UPDATE for id={id_reg} with rack_id={rack_id}")
         cur.execute("""
             UPDATE inventory_count
             SET counter_name=?, code_item=?, boxqty=?, boxunitqty=?, boxunittotal=?, magazijn=?, winkel=?, total=?, current_inventory=?, difference=?, deposit_id=?, rack_id=?, location=?, count_date=?
