@@ -488,7 +488,8 @@ def main():
     # (los binds van después de crear los widgets, sin indentación extra)
     root = tk.Tk()
     root.title("VLM Inventary")
-    root.geometry("640x420")
+    # Increase height by ~2 cm (approx. 80 pixels) to show more options
+    root.geometry("640x500")
 
     # --- Widgets principales ---
     frm = ttk.Frame(root, padding=10)
@@ -602,8 +603,8 @@ def main():
     lbl_location.grid(row=11, column=1, sticky="w")
 
     # Inventario actual
-    lbl_current = ttk.Label(frm, text="Inventario actual: ")
-    lbl_current.grid(row=12, column=0, sticky="w")
+    ##lbl_current = ttk.Label(frm, text="Inventario actual: ")
+    ##lbl_current.grid(row=12, column=0, sticky="w")
     def update_boxunittotal(*args):
         try:
             boxqty = int(entry_boxqty.get())
@@ -869,17 +870,17 @@ def main():
     # Quick reports dropdown (below 'Ver Registros')
     rpt_options = [
         "Reporte por Deposito",
-        "Reporte por contador",
+        "Reporte por Contador",
         "Reporte Verificacion",
         "Reporte Verificacion (con Remarks)",
         "Reporte Diferencias",
-        "Diferencias Resumen (inventory_count_res)",
-        "Registros Sin codigo",
-        "Items no en Inventario",
-        "Diferencias por Items",
-        "Diferencias > X",
-        "Diferencias por Counter/Loc/Item",
-        "Diferencia Item Detalle",
+        "Reporte Diferencias Resumen (i_c_r)",
+        "Reporte Registros Sin Codigo",
+        "Reporte Items no en Inventario",
+        "Reporte Diferencias por Items",
+        "Reporte Diferencias > X",
+        "Reporte Diferencias por Counter-Loc-Item",
+        "Reporte Diferencia Item Detalle",
     ]
     cmb_rpt_main = ttk.Combobox(frm, values=rpt_options, state="readonly", width=36)
     cmb_rpt_main.set(rpt_options[0])
@@ -887,6 +888,11 @@ def main():
         sel = cmb_rpt_main.get().strip()
         if not sel:
             return
+        # store selected report name on root so report generators can suggest a filename
+        try:
+            root._selected_report_name = sel
+        except Exception:
+            pass
         key = sel.lower().replace(" ", "").replace("/", "").replace("\u00a0", "")
         try:
             import ui_pdf_report as rpt
@@ -944,14 +950,33 @@ def main():
             elif "resumen" in key or "inventory_count_res" in key:
                 # Always use the standalone resumen implementation to ensure it includes the updated columns
                 try:
+                    print('DEBUG: ui_main will try ui_pdf_report_resumen for diferencias resumen')
+                    try:
+                        messagebox.showinfo('Debug', 'Llamando a ui_pdf_report_resumen.generate_pdf_report_diferencias_resumen', parent=root)
+                    except Exception:
+                        pass
+                    print('DEBUG: attempting import ui_pdf_report_resumen')
                     import ui_pdf_report_resumen as rpt_res
-                    rpt_res.generate_pdf_report_diferencias_resumen(root, db_path=DB_NAME)
-                except Exception:
+                    print('DEBUG: import succeeded; has func =', hasattr(rpt_res, 'generate_pdf_report_diferencias_resumen'))
+                    try:
+                        rpt_res.generate_pdf_report_diferencias_resumen(root, db_path=DB_NAME)
+                        print('DEBUG: call to rpt_res.generate_pdf_report_diferencias_resumen returned normally')
+                    except Exception as e_call:
+                        print('DEBUG: exception calling rpt_res.generate_pdf_report_diferencias_resumen:', e_call)
+                        raise
+                except Exception as e:
+                    print('DEBUG: ui_pdf_report_resumen import/call failed:', e)
                     # fallback: try the loaded module's implementation if resumen module fails
                     fn = getattr(rpt, "generate_pdf_report_diferencias_resumen", None)
                     if fn is not None:
-                        fn(root, db_path=DB_NAME)
+                        try:
+                            print('DEBUG: falling back to rpt.generate_pdf_report_diferencias_resumen')
+                            fn(root, db_path=DB_NAME)
+                        except Exception as e_f:
+                            print('DEBUG: fallback rpt.generate_pdf_report_diferencias_resumen raised:', e_f)
+                            raise
                     else:
+                        print('DEBUG: no fallback function found on rpt; re-raising')
                         raise
             elif "diferenciaitemdetalle" in key or "itemdetalle" in key:
                 rpt.generate_pdf_report_diferencias_item_detalle(root, db_path=DB_NAME)
@@ -1256,13 +1281,191 @@ def main():
         root.after(2000, lambda: msg_guardado.set(""))
 
     def export_data():
+        # Ask deposits selection from resumen helper if available
+        sel_deps = None
+        try:
+            try:
+                from ui_pdf_report_resumen import _ask_select_deposits
+                sel_deps = _ask_select_deposits(root, DB_NAME)
+            except Exception:
+                sel_deps = None
+        except Exception:
+            sel_deps = None
+
+        # Ask counters selection (local helper)
+        def _ask_select_counters(parent, db_path: str):
+            try:
+                import tkinter as tk
+                from tkinter import ttk
+            except Exception:
+                return None
+
+            try:
+                conn = sqlite3.connect(db_path)
+                cur = conn.cursor()
+                cur.execute("SELECT DISTINCT COALESCE(counter_name, '') FROM inventory_count ORDER BY 1")
+                counters = [c[0] for c in cur.fetchall() if c is not None]
+                conn.close()
+            except Exception:
+                return None
+
+            if not counters:
+                return None
+
+            win = tk.Toplevel(parent)
+            win.title('Seleccionar Contadores')
+            win.transient(parent)
+            win.grab_set()
+
+            lbl = ttk.Label(win, text='Seleccione contadores (marca "Todos" o elija individualmente):')
+            lbl.pack(padx=8, pady=(8, 4))
+
+            canvas = tk.Canvas(win, borderwidth=0, height=200)
+            frame_inner = ttk.Frame(canvas)
+            vsb = ttk.Scrollbar(win, orient='vertical', command=canvas.yview)
+            canvas.configure(yscrollcommand=vsb.set)
+            vsb.pack(side='right', fill='y')
+            canvas.pack(side='left', fill='both', expand=True, padx=8, pady=4)
+            canvas.create_window((0, 0), window=frame_inner, anchor='nw')
+
+            def _on_frame_configure(event=None):
+                try:
+                    canvas.configure(scrollregion=canvas.bbox('all'))
+                except Exception:
+                    pass
+
+            frame_inner.bind('<Configure>', _on_frame_configure)
+
+            vars_list = []
+            id_map = []
+            todos_var = tk.IntVar(value=1)
+
+            def _set_all(v=None):
+                val = todos_var.get()
+                for vv in vars_list:
+                    vv.set(bool(val))
+
+            chk_all = ttk.Checkbutton(frame_inner, text='Todos', variable=todos_var, command=_set_all)
+            chk_all.pack(anchor='w', pady=2)
+
+            for c in counters:
+                cname = c or ''
+                var = tk.IntVar(value=1)
+                cb = ttk.Checkbutton(frame_inner, text=cname if cname != '' else '(Sin nombre)', variable=var, onvalue=1, offvalue=0)
+                cb.pack(anchor='w', padx=6)
+                vars_list.append(var)
+                id_map.append(cname)
+
+            def _update_todos():
+                try:
+                    all_on = all(v.get() for v in vars_list)
+                    todos_var.set(1 if all_on else 0)
+                except Exception:
+                    pass
+
+            for var in vars_list:
+                try:
+                    var.trace_add('write', lambda *a: _update_todos())
+                except Exception:
+                    try:
+                        var.trace('w', lambda *a: _update_todos())
+                    except Exception:
+                        pass
+
+            sel_vals = None
+            frm = ttk.Frame(win)
+            frm.pack(padx=8, pady=8)
+
+            def _on_ok():
+                selected = [id_map[i] for i, v in enumerate(vars_list) if v.get()]
+                nonlocal sel_vals
+                sel_vals = selected if selected else None
+                win.destroy()
+
+            def _on_cancel():
+                nonlocal sel_vals
+                sel_vals = None
+                win.destroy()
+
+            btn_ok = ttk.Button(frm, text='OK', command=_on_ok)
+            btn_ok.pack(side='left', padx=6)
+            btn_cancel = ttk.Button(frm, text='Cancelar', command=_on_cancel)
+            btn_cancel.pack(side='left', padx=6)
+
+            parent_w = getattr(parent, 'winfo_toplevel', lambda: parent)()
+            try:
+                win.geometry('+%d+%d' % (parent_w.winfo_rootx()+50, parent_w.winfo_rooty()+50))
+            except Exception:
+                pass
+
+            win.wait_window()
+            return sel_vals
+
+        try:
+            sel_counters = _ask_select_counters(root, DB_NAME)
+        except Exception:
+            sel_counters = None
+
+        # Build suggested filename based on selections
+        def _sanitize_filename(s):
+            try:
+                s = str(s).strip().replace(' ', '_')
+            except Exception:
+                s = 'val'
+            allowed = []
+            for ch in s:
+                if ch.isalnum() or ch in ('-', '_'):
+                    allowed.append(ch)
+            out = ''.join(allowed)
+            return out[:80] if out else 'val'
+
+        suggested_parts = []
+        if sel_deps:
+            try:
+                conn_tmp = sqlite3.connect(DB_NAME)
+                cur_tmp = conn_tmp.cursor()
+                # total deposits to detect "all"
+                cur_tmp.execute("SELECT COUNT(*) FROM deposits")
+                total_deps = cur_tmp.fetchone()[0] or 0
+                placeholders = ','.join('?' for _ in sel_deps)
+                cur_tmp.execute(f"SELECT deposit_description FROM deposits WHERE deposit_id IN ({placeholders})", tuple(sel_deps))
+                fetched = [r[0] for r in cur_tmp.fetchall()]
+                conn_tmp.close()
+                if total_deps > 0 and len(sel_deps) == total_deps:
+                    suggested_parts.append('Dep_all')
+                else:
+                    names = [f or str(d) for f, d in zip(fetched, sel_deps)]
+                    names_s = '_'.join(_sanitize_filename(n) for n in names) if names else '_'.join(str(d) for d in sel_deps)
+                    suggested_parts.append(f"Dep_{names_s}")
+            except Exception:
+                suggested_parts.append('Dep_' + '_'.join(str(d) for d in sel_deps))
+        if sel_counters:
+            try:
+                # detect if all counters selected
+                conn_tmp = sqlite3.connect(DB_NAME)
+                cur_tmp = conn_tmp.cursor()
+                cur_tmp.execute("SELECT COUNT(DISTINCT COALESCE(counter_name,'')) FROM inventory_count")
+                total_counters = cur_tmp.fetchone()[0] or 0
+                conn_tmp.close()
+                if total_counters > 0 and len(sel_counters) == total_counters:
+                    suggested_parts.append('Counter_all')
+                else:
+                    counters_s = '_'.join(_sanitize_filename(c) for c in sel_counters)
+                    suggested_parts.append(f"Counter_{counters_s}")
+            except Exception:
+                suggested_parts.append('Counter_' + '_'.join(str(c) for c in sel_counters))
+
+        suggested = 'exp_' + '_'.join(suggested_parts) if suggested_parts else 'exp_all'
+
         file_path = filedialog.asksaveasfilename(defaultextension=".xlsx",
+                                                 initialfile=suggested,
                                                  filetypes=[("Excel", "*.xlsx"), ("CSV", "*.csv")])
         if not file_path:
             return
         conn = sqlite3.connect(DB_NAME)
         try:
-            df = pd.read_sql_query("""
+            # Build base SQL and apply optional filters for deposits and counters
+            base_sql = '''
                   SELECT c.id, c.counter_name, c.code_item,
                       COALESCE(i.description_item, '') AS description_item,
                       c.boxqty, c.boxunitqty, c.boxunittotal,
@@ -1274,8 +1477,25 @@ def main():
                 LEFT JOIN items i ON i.code_item = c.code_item
                 LEFT JOIN deposits d ON d.deposit_id = c.deposit_id
                 LEFT JOIN racks r ON r.rack_id = c.rack_id
-                ORDER BY c.counter_name
-            """, conn)
+            '''
+
+            where_clauses = []
+            params = []
+            if sel_deps:
+                placeholders = ','.join('?' for _ in sel_deps)
+                where_clauses.append(f"c.deposit_id IN ({placeholders})")
+                params.extend(sel_deps)
+            if sel_counters:
+                placeholders = ','.join('?' for _ in sel_counters)
+                where_clauses.append(f"c.counter_name IN ({placeholders})")
+                params.extend(sel_counters)
+
+            if where_clauses:
+                sql = base_sql + ' WHERE ' + ' AND '.join(where_clauses) + '\n ORDER BY c.counter_name'
+            else:
+                sql = base_sql + '\n ORDER BY c.counter_name'
+
+            df = pd.read_sql_query(sql, conn, params=params)
         except Exception as e:
             conn.close()
             messagebox.showerror("Error", f"Error al leer la base de datos: {e}")

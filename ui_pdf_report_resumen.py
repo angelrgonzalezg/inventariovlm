@@ -5,10 +5,27 @@ from tkinter import filedialog, messagebox
 
 DEFAULT_DB = "inventariovlm.db"
 
+print('DEBUG: ui_pdf_report_resumen module loaded')
 
-def _asksave(parent: Optional[object]) -> Optional[str]:
+
+def _asksave(parent: Optional[object], default_name: Optional[str] = None) -> Optional[str]:
     try:
-        return filedialog.asksaveasfilename(parent=parent, defaultextension='.pdf', filetypes=[('PDF files', '*.pdf')])
+        # determine suggested filename: explicit default_name or parent's selected report name
+        suggested = default_name
+        try:
+            if suggested is None and hasattr(parent, '_selected_report_name'):
+                suggested = getattr(parent, '_selected_report_name')
+        except Exception:
+            suggested = suggested
+        if suggested:
+            # sanitize: keep short filename, replace spaces with underscores
+            try:
+                base = str(suggested).strip().replace(' ', '_')
+            except Exception:
+                base = 'reporte'
+        else:
+            base = None
+        return filedialog.asksaveasfilename(parent=parent, defaultextension='.pdf', initialfile=base, filetypes=[('PDF files', '*.pdf')])
     except Exception:
         return None
 
@@ -37,49 +54,224 @@ def _ensure_reportlab(parent: Optional[object] = None) -> bool:
         return False
 
 
+def _ask_select_deposits(parent, db_path: str):
+    """Show a modal dialog with deposit checkboxes and return selected deposit_ids or None.
+
+    Returns a list of deposit_id (ints) if the user selected one or more deposits,
+    or None if the user cancelled or selected none.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import ttk
+    except Exception:
+        return None
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT deposit_id, deposit_description FROM deposits ORDER BY deposit_description")
+        deps = cur.fetchall()
+        conn.close()
+    except Exception:
+        return None
+
+    if not deps:
+        return None
+
+    win = tk.Toplevel(parent)
+    win.title('Seleccionar Depósitos')
+    win.transient(parent)
+    win.grab_set()
+
+    lbl = ttk.Label(win, text='Seleccione depósitos (marca "Todos" o elija individualmente):')
+    lbl.pack(padx=8, pady=(8, 4))
+
+    # scrollable frame for many checkboxes
+    canvas = tk.Canvas(win, borderwidth=0, height=200)
+    frame_inner = ttk.Frame(canvas)
+    vsb = ttk.Scrollbar(win, orient='vertical', command=canvas.yview)
+    canvas.configure(yscrollcommand=vsb.set)
+    vsb.pack(side='right', fill='y')
+    canvas.pack(side='left', fill='both', expand=True, padx=8, pady=4)
+    canvas.create_window((0, 0), window=frame_inner, anchor='nw')
+
+    def _on_frame_configure(event=None):
+        try:
+            canvas.configure(scrollregion=canvas.bbox('all'))
+        except Exception:
+            pass
+
+    frame_inner.bind('<Configure>', _on_frame_configure)
+
+    # 'Todos' checkbox
+    vars_list = []
+    id_map = []
+    todos_var = tk.IntVar(value=1)
+
+    def _set_all(v=None):
+        val = todos_var.get()
+        for vv in vars_list:
+            vv.set(bool(val))
+
+    chk_all = ttk.Checkbutton(frame_inner, text='Todos', variable=todos_var, command=_set_all)
+    chk_all.pack(anchor='w', pady=2)
+
+    for d in deps:
+        did = d[0]
+        ddesc = d[1] or str(did)
+        var = tk.IntVar(value=1)
+        cb = ttk.Checkbutton(frame_inner, text=ddesc, variable=var, onvalue=1, offvalue=0)
+        cb.pack(anchor='w', padx=6)
+        vars_list.append(var)
+        id_map.append(did)
+
+    def _update_todos():
+        try:
+            all_on = all(v.get() for v in vars_list)
+            todos_var.set(1 if all_on else 0)
+        except Exception:
+            pass
+
+    for var in vars_list:
+        try:
+            var.trace_add('write', lambda *a: _update_todos())
+        except Exception:
+            try:
+                var.trace('w', lambda *a: _update_todos())
+            except Exception:
+                pass
+
+    sel_ids = None
+    frm = ttk.Frame(win)
+    frm.pack(padx=8, pady=8)
+
+    def _on_ok():
+        selected = [id_map[i] for i, v in enumerate(vars_list) if v.get()]
+        nonlocal sel_ids
+        sel_ids = selected if selected else None
+        win.destroy()
+
+    def _on_cancel():
+        nonlocal sel_ids
+        sel_ids = None
+        win.destroy()
+
+    btn_ok = ttk.Button(frm, text='OK', command=_on_ok)
+    btn_ok.pack(side='left', padx=6)
+    btn_cancel = ttk.Button(frm, text='Cancelar', command=_on_cancel)
+    btn_cancel.pack(side='left', padx=6)
+
+    parent_w = getattr(parent, 'winfo_toplevel', lambda: parent)()
+    try:
+        win.geometry('+%d+%d' % (parent_w.winfo_rootx()+50, parent_w.winfo_rooty()+50))
+    except Exception:
+        pass
+
+    win.wait_window()
+    return sel_ids
+
+
 def generate_pdf_report_diferencias_resumen(parent, db_path: str = DEFAULT_DB):
+    """Generate the differences summary report.
+
+    Prompts the user to select deposits (checkbox dialog). If deposits are selected
+    the report aggregates from `inventory_count`, otherwise it uses
+    `inventory_count_res`.
+    """
+
+    # Ask deposits first
+    try:
+        sel_deps = _ask_select_deposits(parent, db_path)
+    except Exception:
+        sel_deps = None
+
+    # Ask for file path
     file_path = _asksave(parent)
     if not file_path:
         return
     if not _ensure_reportlab(parent):
         return
+
     if not os.path.exists(db_path):
         messagebox.showerror('Error', f'No se encontró la base de datos: {db_path}', parent=parent)
         return
 
+    rows = []
+    deposit_label = ''
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
-        cur.execute('PRAGMA table_info(inventory_count_res)')
-        cols = [c[1] for c in cur.fetchall()]
 
-        sel_cols = ['code_item']
-        sel_cols.append('description_item' if 'description_item' in cols else "'' AS description_item")
-        sel_cols.append('total' if 'total' in cols else '0 AS total')
-        sel_cols.append('sales_qty' if 'sales_qty' in cols else '0 AS sales_qty')
-        sel_cols.append('purchasing_qty' if 'purchasing_qty' in cols else '0 AS purchasing_qty')
-        sel_cols.append('total_calc' if 'total_calc' in cols else '0 AS total_calc')
-        # include current_inventory as 'Actual' column if present
-        sel_cols.append('current_inventory' if 'current_inventory' in cols else '0 AS current_inventory')
+        if sel_deps:
+            placeholders = ','.join('?' for _ in sel_deps)
+            try:
+                cur.execute(f"SELECT deposit_description FROM deposits WHERE deposit_id IN ({placeholders})", tuple(sel_deps))
+                descs = [d[0] for d in cur.fetchall() if d and d[0]]
+                deposit_label = ' (' + ', '.join(descs or [str(d) for d in sel_deps]) + ')'
+            except Exception:
+                deposit_label = ' (' + ', '.join(str(d) for d in sel_deps) + ')'
 
-        if 'difference' in cols:
-            diff_expr = 'difference'
-        elif 'total_calc' in cols and 'current_inventory' in cols:
-            diff_expr = '(current_inventory - total_calc)'
-        elif 'total' in cols and 'current_inventory' in cols:
-            diff_expr = '(current_inventory - total)'
+            sql = '''
+                SELECT ic.code_item AS code_item,
+                       MAX(COALESCE(i.description_item, '')) AS description_item,
+                       COALESCE(SUM(ic.total),0) AS total,
+                       COALESCE(s.sales_qty,0) AS sales_qty,
+                       COALESCE(p.purchasing_qty,0) AS purchasing_qty,
+                       (COALESCE(SUM(ic.total),0) + COALESCE(p.purchasing_qty,0) - COALESCE(s.sales_qty,0)) AS total_calc,
+                       MAX(COALESCE(i.current_inventory,0)) AS current_inventory,
+                       (MAX(COALESCE(i.current_inventory,0)) - (COALESCE(SUM(ic.total),0) + COALESCE(p.purchasing_qty,0) - COALESCE(s.sales_qty,0))) AS difference
+                  FROM inventory_count ic
+                  LEFT JOIN items i ON i.code_item = ic.code_item
+                  LEFT JOIN (
+                      SELECT code_item, SUM(sales_qty) AS sales_qty FROM sales GROUP BY code_item
+                  ) s ON s.code_item = ic.code_item
+                  LEFT JOIN (
+                      SELECT code_item, SUM(purchasing_qty) AS purchasing_qty FROM purchasing GROUP BY code_item
+                  ) p ON p.code_item = ic.code_item
+                 WHERE ic.deposit_id IN (%s)
+                 GROUP BY ic.code_item
+            ''' % (placeholders)
+            cur.execute(sql, tuple(sel_deps))
+            rows = cur.fetchall()
         else:
-            diff_expr = '0'
+            cur.execute('PRAGMA table_info(inventory_count_res)')
+            cols = [c[1] for c in cur.fetchall()]
+            sel_cols = ['code_item']
+            sel_cols.append('description_item' if 'description_item' in cols else "'' AS description_item")
+            sel_cols.append('total' if 'total' in cols else '0 AS total')
+            sel_cols.append('sales_qty' if 'sales_qty' in cols else '0 AS sales_qty')
+            sel_cols.append('purchasing_qty' if 'purchasing_qty' in cols else '0 AS purchasing_qty')
+            sel_cols.append('total_calc' if 'total_calc' in cols else '0 AS total_calc')
+            sel_cols.append('current_inventory' if 'current_inventory' in cols else '0 AS current_inventory')
 
-        sql = f"SELECT {', '.join(sel_cols)}, {diff_expr} AS difference FROM inventory_count_res ORDER BY ABS({diff_expr}) DESC"
-        cur.execute(sql)
-        rows = cur.fetchall()
+            if 'difference' in cols:
+                diff_expr = 'difference'
+            elif 'total_calc' in cols and 'current_inventory' in cols:
+                diff_expr = '(current_inventory - total_calc)'
+            elif 'total' in cols and 'current_inventory' in cols:
+                diff_expr = '(current_inventory - total)'
+            else:
+                diff_expr = '0'
+
+            sql = f"SELECT {', '.join(sel_cols)}, {diff_expr} AS difference FROM inventory_count_res"
+            cur.execute(sql)
+            rows = cur.fetchall()
+
         conn.close()
     except Exception as e:
         messagebox.showerror('Error', f'Error al leer la base de datos: {e}', parent=parent)
         return
 
-    # lazy imports for reportlab
+    # Ensure ordering by absolute difference desc
+    try:
+        rows = sorted(rows, key=lambda r: abs(r[-1]) if r and len(r) and isinstance(r[-1], (int, float)) else abs(float(r[-1])) if r and len(r) else 0, reverse=True)
+    except Exception:
+        try:
+            rows = sorted(rows, key=lambda r: abs(float(r[-1])) if r and len(r) else 0, reverse=True)
+        except Exception:
+            pass
+
+    # Build PDF
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet
@@ -91,21 +283,29 @@ def generate_pdf_report_diferencias_resumen(parent, db_path: str = DEFAULT_DB):
 
     doc = SimpleDocTemplate(file_path, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
     story = []
-    story.append(Paragraph('Reporte Diferencias - Resumen (inventory_count_res)', title_style))
+    if sel_deps:
+        story.append(Paragraph(f'Reporte Diferencias - Resumen{deposit_label}', title_style))
+    else:
+        story.append(Paragraph('Reporte Diferencias - Resumen (inventory_count_res)', title_style))
     story.append(Spacer(1, 8))
 
     headers = ['Código', 'Descripción', 'Total', 'Sales', 'Purchasing', 'Total_calc', 'Actual', 'Diferencia']
     data = [headers]
     for r in rows:
+        # normalize length
+        vals = list(r)
+        # pad to expected length
+        while len(vals) < 8:
+            vals.append('')
         data.append([
-            r[0] or '',
-            (r[1] or '')[:200],
-            str(r[2] or 0),
-            str(r[3] or 0),
-            str(r[4] or 0),
-            str(r[5] or 0),
-            str(r[6] or 0),
-            str(abs(r[7] or 0))
+            vals[0] or '',
+            (vals[1] or '')[:200],
+            str(vals[2] or 0),
+            str(vals[3] or 0),
+            str(vals[4] or 0),
+            str(vals[5] or 0),
+            str(vals[6] or 0),
+            str(abs(vals[7] or 0))
         ])
 
     if len(data) == 1:
@@ -153,10 +353,20 @@ def add_pdf_report_diferencias_resumen_button(parent_frame, db_path: str = DEFAU
         return btn
 
 
+def _debug_button_registered():
+    print('DEBUG: add_pdf_report_diferencias_resumen_button available in resumen module')
+
+
 def generate_pdf_report_nocode_items(parent, db_path: str = DEFAULT_DB):
     """Genera un PDF con los registros de la tabla `nocode_items`.
     La función adapta las columnas disponibles y muestra una tabla simple.
     """
+    # Ask deposits first so user always sees the selection dialog before the save dialog
+    try:
+        sel_deps = _ask_select_deposits(parent, db_path)
+    except Exception:
+        sel_deps = None
+
     file_path = _asksave(parent)
     if not file_path:
         return

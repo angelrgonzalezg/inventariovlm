@@ -64,7 +64,20 @@ def _ensure_reportlab(parent: Optional[object] = None) -> bool:
 
 
 def _asksave(parent: object) -> Optional[str]:
-    return filedialog.asksaveasfilename(parent=parent, defaultextension=".pdf",
+    # backward-compatible: try to get a suggested name from parent._selected_report_name
+    suggested = None
+    try:
+        if hasattr(parent, '_selected_report_name'):
+            suggested = getattr(parent, '_selected_report_name')
+    except Exception:
+        suggested = None
+    initial = None
+    if suggested:
+        try:
+            initial = str(suggested).strip().replace(' ', '_')
+        except Exception:
+            initial = None
+    return filedialog.asksaveasfilename(parent=parent, defaultextension=".pdf", initialfile=initial,
                                         filetypes=[("PDF files", "*.pdf")])
 
 
@@ -123,7 +136,13 @@ def add_pdf_report_diferencias_por_counter_button(parent_frame, db_path: str = D
 
 
 def add_pdf_report_diferencias_resumen_button(parent_frame, db_path: str = DEFAULT_DB, button_text: str = "Diferencias Resumen"):
-    return _make_button(parent_frame, row=33, text=button_text, command=lambda: _invoke_report_by_name('generate_pdf_report_diferencias_resumen', parent_frame, db_path))
+    try:
+        # Prefer the small resumen module if available
+        import ui_pdf_report_resumen as rpt_res
+        return _make_button(parent_frame, row=33, text=button_text, command=lambda: rpt_res.generate_pdf_report_diferencias_resumen(parent_frame, db_path))
+    except Exception:
+        # fallback to invoking the local implementation
+        return _make_button(parent_frame, row=33, text=button_text, command=lambda: _invoke_report_by_name('generate_pdf_report_diferencias_resumen', parent_frame, db_path))
 
 
 # ----------------- Report generators -----------------
@@ -256,6 +275,121 @@ def generate_pdf_report(parent, db_path: str = DEFAULT_DB):
 
 
 def generate_pdf_report_por_contador(parent, db_path: str = DEFAULT_DB):
+    # Ask which counters to include (multi-select). Reuse pattern from deposit selection.
+    def _ask_select_counters(parent, db_path: str):
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+        except Exception:
+            return None
+
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT DISTINCT COALESCE(counter_name, '') FROM inventory_count ORDER BY 1")
+            counters = [c[0] for c in cur.fetchall() if c is not None]
+            conn.close()
+        except Exception:
+            return None
+
+        if not counters:
+            return None
+
+        win = tk.Toplevel(parent)
+        win.title('Seleccionar Contadores')
+        win.transient(parent)
+        win.grab_set()
+
+        lbl = ttk.Label(win, text='Seleccione contadores (marca "Todos" o elija individualmente):')
+        lbl.pack(padx=8, pady=(8, 4))
+
+        canvas = tk.Canvas(win, borderwidth=0, height=200)
+        frame_inner = ttk.Frame(canvas)
+        vsb = ttk.Scrollbar(win, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True, padx=8, pady=4)
+        canvas.create_window((0, 0), window=frame_inner, anchor='nw')
+
+        def _on_frame_configure(event=None):
+            try:
+                canvas.configure(scrollregion=canvas.bbox('all'))
+            except Exception:
+                pass
+
+        frame_inner.bind('<Configure>', _on_frame_configure)
+
+        vars_list = []
+        id_map = []
+        todos_var = tk.IntVar(value=1)
+
+        def _set_all(v=None):
+            val = todos_var.get()
+            for vv in vars_list:
+                vv.set(bool(val))
+
+        chk_all = ttk.Checkbutton(frame_inner, text='Todos', variable=todos_var, command=_set_all)
+        chk_all.pack(anchor='w', pady=2)
+
+        for c in counters:
+            cname = c or ''
+            var = tk.IntVar(value=1)
+            cb = ttk.Checkbutton(frame_inner, text=cname if cname != '' else '(Sin nombre)', variable=var, onvalue=1, offvalue=0)
+            cb.pack(anchor='w', padx=6)
+            vars_list.append(var)
+            id_map.append(cname)
+
+        def _update_todos():
+            try:
+                all_on = all(v.get() for v in vars_list)
+                todos_var.set(1 if all_on else 0)
+            except Exception:
+                pass
+
+        for var in vars_list:
+            try:
+                var.trace_add('write', lambda *a: _update_todos())
+            except Exception:
+                try:
+                    var.trace('w', lambda *a: _update_todos())
+                except Exception:
+                    pass
+
+        sel_vals = None
+        frm = ttk.Frame(win)
+        frm.pack(padx=8, pady=8)
+
+        def _on_ok():
+            selected = [id_map[i] for i, v in enumerate(vars_list) if v.get()]
+            nonlocal sel_vals
+            sel_vals = selected if selected else None
+            win.destroy()
+
+        def _on_cancel():
+            nonlocal sel_vals
+            sel_vals = None
+            win.destroy()
+
+        btn_ok = ttk.Button(frm, text='OK', command=_on_ok)
+        btn_ok.pack(side='left', padx=6)
+        btn_cancel = ttk.Button(frm, text='Cancelar', command=_on_cancel)
+        btn_cancel.pack(side='left', padx=6)
+
+        parent_w = getattr(parent, 'winfo_toplevel', lambda: parent)()
+        try:
+            win.geometry('+%d+%d' % (parent_w.winfo_rootx()+50, parent_w.winfo_rooty()+50))
+        except Exception:
+            pass
+
+        win.wait_window()
+        return sel_vals
+
+    # ask counters first so user sees selection
+    try:
+        sel_counters = _ask_select_counters(parent, db_path)
+    except Exception:
+        sel_counters = None
+
     file_path = _asksave(parent)
     if not file_path:
         return
@@ -265,7 +399,32 @@ def generate_pdf_report_por_contador(parent, db_path: str = DEFAULT_DB):
         messagebox.showerror("Error", f"No se encontró la base de datos: {db_path}", parent=parent)
         return
 
-    sql = """
+    params = ()
+    if sel_counters:
+        placeholders = ','.join('?' for _ in sel_counters)
+        sql = f"""
+    SELECT 
+        ic.counter_name,
+        d.deposit_description AS deposito,
+        r.rack_description AS rack,
+        ic.location AS ubicacion,
+        ic.code_item AS producto_codigo,
+        COALESCE(i.description_item, '') AS producto,
+        ic.boxqty AS cajas,
+        ic.boxunitqty AS uni_x_cajas,
+        ic.boxunittotal AS tot_uni_cajas,
+        ic.magazijn AS sueltos,
+        ic.total AS total
+    FROM inventory_count ic
+    LEFT JOIN deposits d ON ic.deposit_id = d.deposit_id
+    LEFT JOIN racks r ON ic.rack_id = r.rack_id
+    LEFT JOIN items i on ic.code_item = i.code_item
+    WHERE ic.counter_name IN ({placeholders})
+    ORDER BY ic.counter_name ASC, d.deposit_description ASC, r.rack_description ASC, ic.code_item ASC;
+    """
+        params = tuple(sel_counters)
+    else:
+        sql = """
     SELECT 
         ic.counter_name,
         d.deposit_description AS deposito,
@@ -288,7 +447,7 @@ def generate_pdf_report_por_contador(parent, db_path: str = DEFAULT_DB):
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
-        cur.execute(sql)
+        cur.execute(sql, params)
         rows = cur.fetchall()
         conn.close()
     except Exception as e:
@@ -352,6 +511,18 @@ def generate_pdf_report_por_contador(parent, db_path: str = DEFAULT_DB):
                 table.setStyle(tbl_style)
                 story.append(table)
                 story.append(Spacer(1, 8))
+    
+    if not grouped:
+        story.append(Paragraph("No hay registros para reportar.", normal))
+
+    try:
+        doc.build(story)
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al generar el PDF: {e}", parent=parent)
+        return
+
+    _open_pdf_file(file_path, parent=parent)
+    messagebox.showinfo("OK", f"Reporte PDF generado: {file_path}", parent=parent)
 
 
 def generate_pdf_report_diferencias_resumen(parent, db_path: str = DEFAULT_DB):
@@ -454,6 +625,18 @@ def generate_pdf_report_diferencias_resumen(parent, db_path: str = DEFAULT_DB):
 
 
 def generate_pdf_report_por_deposito(parent, db_path: str = DEFAULT_DB):
+    # Ask which deposits to include (use resumen helper if available)
+    sel_deps = None
+    try:
+        try:
+            from ui_pdf_report_resumen import _ask_select_deposits
+            sel_deps = _ask_select_deposits(parent, db_path)
+        except Exception:
+            # helper not available; ignore and continue with all deposits
+            sel_deps = None
+    except Exception:
+        sel_deps = None
+
     file_path = _asksave(parent)
     if not file_path:
         return
@@ -463,7 +646,8 @@ def generate_pdf_report_por_deposito(parent, db_path: str = DEFAULT_DB):
         messagebox.showerror("Error", f"No se encontró la base de datos: {db_path}", parent=parent)
         return
 
-    sql = """
+    # Build SQL, optionally filtering by selected deposits
+    base_sql = """
     SELECT 
         d.deposit_description AS deposito,
         r.rack_description AS rack,
@@ -474,18 +658,26 @@ def generate_pdf_report_por_deposito(parent, db_path: str = DEFAULT_DB):
         ic.boxunitqty AS uni_x_cajas,
         ic.boxunittotal AS tot_uni_cajas,
         ic.magazijn AS sueltos,
-        ic.total AS total
+        ic.total AS total,
+        ic.deposit_id AS deposit_id
     FROM inventory_count ic
     LEFT JOIN deposits d ON ic.deposit_id = d.deposit_id
     LEFT JOIN racks r ON ic.rack_id = r.rack_id
     LEFT JOIN items i on ic.code_item = i.code_item
-    ORDER BY d.deposit_description ASC, r.rack_description ASC, ic.code_item ASC;
     """
+
+    params = ()
+    if sel_deps:
+        placeholders = ','.join('?' for _ in sel_deps)
+        sql = base_sql + f" WHERE ic.deposit_id IN ({placeholders}) ORDER BY d.deposit_description ASC, r.rack_description ASC, ic.code_item ASC;"
+        params = tuple(sel_deps)
+    else:
+        sql = base_sql + " ORDER BY d.deposit_description ASC, r.rack_description ASC, ic.code_item ASC;"
 
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
-        cur.execute(sql)
+        cur.execute(sql, params)
         rows = cur.fetchall()
         conn.close()
     except Exception as e:
@@ -562,6 +754,120 @@ def generate_pdf_report_por_deposito(parent, db_path: str = DEFAULT_DB):
 
 
 def generate_pdf_report_verificacion(parent, db_path: str = DEFAULT_DB):
+    # Ask which counters to include (multi-select), similar to `generate_pdf_report_por_contador`.
+    def _ask_select_counters(parent, db_path: str):
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+        except Exception:
+            return None
+
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT DISTINCT COALESCE(counter_name, '') FROM inventory_count ORDER BY 1")
+            counters = [c[0] for c in cur.fetchall() if c is not None]
+            conn.close()
+        except Exception:
+            return None
+
+        if not counters:
+            return None
+
+        win = tk.Toplevel(parent)
+        win.title('Seleccionar Contadores')
+        win.transient(parent)
+        win.grab_set()
+
+        lbl = ttk.Label(win, text='Seleccione contadores (marca "Todos" o elija individualmente):')
+        lbl.pack(padx=8, pady=(8, 4))
+
+        canvas = tk.Canvas(win, borderwidth=0, height=200)
+        frame_inner = ttk.Frame(canvas)
+        vsb = ttk.Scrollbar(win, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True, padx=8, pady=4)
+        canvas.create_window((0, 0), window=frame_inner, anchor='nw')
+
+        def _on_frame_configure(event=None):
+            try:
+                canvas.configure(scrollregion=canvas.bbox('all'))
+            except Exception:
+                pass
+
+        frame_inner.bind('<Configure>', _on_frame_configure)
+
+        vars_list = []
+        id_map = []
+        todos_var = tk.IntVar(value=1)
+
+        def _set_all(v=None):
+            val = todos_var.get()
+            for vv in vars_list:
+                vv.set(bool(val))
+
+        chk_all = ttk.Checkbutton(frame_inner, text='Todos', variable=todos_var, command=_set_all)
+        chk_all.pack(anchor='w', pady=2)
+
+        for c in counters:
+            cname = c or ''
+            var = tk.IntVar(value=1)
+            cb = ttk.Checkbutton(frame_inner, text=cname if cname != '' else '(Sin nombre)', variable=var, onvalue=1, offvalue=0)
+            cb.pack(anchor='w', padx=6)
+            vars_list.append(var)
+            id_map.append(cname)
+
+        def _update_todos():
+            try:
+                all_on = all(v.get() for v in vars_list)
+                todos_var.set(1 if all_on else 0)
+            except Exception:
+                pass
+
+        for var in vars_list:
+            try:
+                var.trace_add('write', lambda *a: _update_todos())
+            except Exception:
+                try:
+                    var.trace('w', lambda *a: _update_todos())
+                except Exception:
+                    pass
+
+        sel_vals = None
+        frm = ttk.Frame(win)
+        frm.pack(padx=8, pady=8)
+
+        def _on_ok():
+            selected = [id_map[i] for i, v in enumerate(vars_list) if v.get()]
+            nonlocal sel_vals
+            sel_vals = selected if selected else None
+            win.destroy()
+
+        def _on_cancel():
+            nonlocal sel_vals
+            sel_vals = None
+            win.destroy()
+
+        btn_ok = ttk.Button(frm, text='OK', command=_on_ok)
+        btn_ok.pack(side='left', padx=6)
+        btn_cancel = ttk.Button(frm, text='Cancelar', command=_on_cancel)
+        btn_cancel.pack(side='left', padx=6)
+
+        parent_w = getattr(parent, 'winfo_toplevel', lambda: parent)()
+        try:
+            win.geometry('+%d+%d' % (parent_w.winfo_rootx()+50, parent_w.winfo_rooty()+50))
+        except Exception:
+            pass
+
+        win.wait_window()
+        return sel_vals
+
+    try:
+        sel_counters = _ask_select_counters(parent, db_path)
+    except Exception:
+        sel_counters = None
+
     file_path = _asksave(parent)
     if not file_path:
         return
@@ -571,6 +877,7 @@ def generate_pdf_report_verificacion(parent, db_path: str = DEFAULT_DB):
         messagebox.showerror("Error", f"No se encontró la base de datos: {db_path}", parent=parent)
         return
 
+    params = ()
     sql = """
     SELECT 
         ic.counter_name,
@@ -590,8 +897,14 @@ def generate_pdf_report_verificacion(parent, db_path: str = DEFAULT_DB):
     LEFT JOIN deposits d ON ic.deposit_id = d.deposit_id
     LEFT JOIN racks r ON ic.rack_id = r.rack_id
     LEFT JOIN items i on ic.code_item = i.code_item
-    ORDER BY ic.counter_name ASC, d.deposit_description ASC, r.rack_description ASC, ic.id ASC;
     """
+
+    if sel_counters:
+        placeholders = ','.join('?' for _ in sel_counters)
+        sql = sql + f"\nWHERE ic.counter_name IN ({placeholders})\nORDER BY ic.counter_name ASC, d.deposit_description ASC, r.rack_description ASC, ic.id ASC;"
+        params = tuple(sel_counters)
+    else:
+        sql = sql + " ORDER BY ic.counter_name ASC, d.deposit_description ASC, r.rack_description ASC, ic.id ASC;"
 
     try:
         conn = sqlite3.connect(db_path)
