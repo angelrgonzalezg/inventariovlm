@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 from tkcalendar import DateEntry
 from db_utils import get_deposits, get_racks
 from ui_registros import mostrar_registros, mostrar_registros_resumen
@@ -490,7 +490,7 @@ def main():
     # ...widgets...
     # (los binds van después de crear los widgets, sin indentación extra)
     root = tk.Tk()
-    root.title("VLM Inventary")
+    root.title("Inventario VLM — CJ Electrical Supply (Draft Version)")
     # Increase height by ~2 cm (approx. 80 pixels) to show more options
     root.geometry("640x500")
 
@@ -545,9 +545,9 @@ def main():
     except Exception:
         pass
 
-    btn_importar_inventory = ttk.Button(frm, text="Importar Inventory", command=importar_inventory)
+    btn_importar_inventory = ttk.Button(frm, text="Importar Inventory", command=importar_inventory, state='disabled')
     btn_importar_inventory.grid(row=22, column=0, pady=8)
-    btn_importar_consolidado = ttk.Button(frm, text="Importar Consolidado CSV", command=importar_consolidado_csv)
+    btn_importar_consolidado = ttk.Button(frm, text="Importar Consolidado CSV", command=importar_consolidado_csv, state='disabled')
     btn_importar_consolidado.grid(row=23, column=0, pady=8)
 
     # Campo Remark después de Winkel
@@ -573,7 +573,7 @@ def main():
     # Si la descripción sigue vacía, usar rack_code
     if all(not val for val in racks_display):
         racks_display = [r[0] for r in racks_list]
-    ttk.Label(frm, text="Deposit:").grid(row=2, column=0, sticky="e")
+    ttk.Label(frm, text="Deposito:").grid(row=2, column=0, sticky="e")
     combo_deposit = ttk.Combobox(frm, values=deposits_display, state="readonly", width=14)
     combo_deposit.grid(row=2, column=1, sticky="w")
     ttk.Label(frm, text="Rack:").grid(row=3, column=0, sticky="e")
@@ -656,9 +656,6 @@ def main():
     lbl_current = ttk.Label(frm, text="Inventario actual: ")
     lbl_current.grid(row=12, column=0, sticky="w")
 
-    # Inventario actual
-    ##lbl_current = ttk.Label(frm, text="Inventario actual: ")
-    ##lbl_current.grid(row=12, column=0, sticky="w")
     def update_boxunittotal(*args):
         try:
             boxqty = int(entry_boxqty.get())
@@ -679,10 +676,79 @@ def main():
     btn_export.grid(row=20, column=0, pady=8)
     btn_guardar = ttk.Button(frm, text="Guardar", command=lambda: guardar())
     btn_guardar.grid(row=20, column=1, pady=8)
-    btn_import = ttk.Button(frm, text="Importar Catálogo", command=lambda: import_catalog())
+    btn_import = ttk.Button(frm, text="Importar Catálogo", command=lambda: import_catalog(), state='disabled')
     btn_import.grid(row=21, column=0, pady=8)
     btn_buscar = ttk.Button(frm, text="Buscar", command=lambda: buscar_item())
     btn_buscar.grid(row=21, column=1, pady=8)
+
+    # --- Modo Administrador (requiere contraseña para habilitar acciones sensibles) ---
+    admin_var = tk.IntVar(value=0)
+
+    def set_admin_mode(enabled: bool):
+        # Enable/disable the buttons that require admin privileges
+        try:
+            if enabled:
+                btn_import.state(['!disabled'])
+            else:
+                btn_import.state(['disabled'])
+        except Exception:
+            try:
+                btn_import.config(state='normal' if enabled else 'disabled')
+            except Exception:
+                pass
+        try:
+            if enabled:
+                btn_importar_inventory.state(['!disabled'])
+            else:
+                btn_importar_inventory.state(['disabled'])
+        except Exception:
+            try:
+                btn_importar_inventory.config(state='normal' if enabled else 'disabled')
+            except Exception:
+                pass
+        try:
+            if enabled:
+                btn_importar_consolidado.state(['!disabled'])
+            else:
+                btn_importar_consolidado.state(['disabled'])
+        except Exception:
+            try:
+                btn_importar_consolidado.config(state='normal' if enabled else 'disabled')
+            except Exception:
+                pass
+        try:
+            if enabled:
+                btn_update_current.state(['!disabled'])
+            else:
+                btn_update_current.state(['disabled'])
+        except Exception:
+            try:
+                btn_update_current.config(state='normal' if enabled else 'disabled')
+            except Exception:
+                pass
+
+    def toggle_admin():
+        # If user is trying to enable admin mode, ask for password
+        if admin_var.get():
+            pw = simpledialog.askstring("Modo Administrador", "Ingrese la contraseña de administrador:", parent=root, show='*')
+            if pw is None:
+                # user cancelled -> revert
+                admin_var.set(0)
+                return
+            if pw == "CJ123*":
+                set_admin_mode(True)
+                messagebox.showinfo("Administrador", "Modo administrador activado.", parent=root)
+            else:
+                messagebox.showerror("Error", "Contraseña incorrecta.", parent=root)
+                admin_var.set(0)
+                set_admin_mode(False)
+        else:
+            # disabling admin mode; just turn off
+            set_admin_mode(False)
+
+    chk_admin = ttk.Checkbutton(frm, text="Modo Administrador", variable=admin_var, command=toggle_admin)
+    # Colocar debajo del dropdown de reportes (cmb_rpt_main está en row=23, column=1)
+    chk_admin.grid(row=24, column=1, padx=6, pady=4, sticky='w')
 
     # Disable Guardar until required fields are filled (counter, deposit, rack, date)
     def update_guardar_state(event=None):
@@ -836,7 +902,7 @@ def main():
             summary += f"\nCódigos no encontrados: {len(not_found)} (guardados en {nf_path})"
         messagebox.showinfo("Actualización completada", summary, parent=root)
 
-    btn_update_current = ttk.Button(frm, text="Actualizar current_inventory (CSV)", command=lambda: actualizar_current_inventory_from_csv())
+    btn_update_current = ttk.Button(frm, text="Actualizar current_inventory (CSV)", command=lambda: actualizar_current_inventory_from_csv(), state='disabled')
     btn_update_current.grid(row=24, column=0, pady=8)
 
     def generar_inventory_count_res():
@@ -1159,120 +1225,127 @@ def main():
         add_pdf_report_diferencias_button = getattr(rpt_mod, 'add_pdf_report_diferencias_button', add_pdf_report_button)
         add_pdf_report_diferencias_por_item_button = getattr(rpt_mod, 'add_pdf_report_diferencias_por_item_button', add_pdf_report_button)
 
-    try:
-        btn_pdf = add_pdf_report_button(frm, db_path=DB_NAME, button_text="Generar PDF")
-        try:
-            btn_pdf.grid(row=24, column=2, pady=8)
-        except Exception:
-            pass
-    except Exception:
-        # If creation fails, create a placeholder that shows an error when clicked
-        btn_pdf = ttk.Button(frm, text="Generar PDF", command=lambda: messagebox.showerror('Error', 'Reporte no disponible', parent=root))
-        try:
-            btn_pdf.grid(row=24, column=2, pady=8)
-        except Exception:
-            pass
+    # Comentado: botón de "Generar PDF" (presente en el dropdown)
+    # try:
+    #     btn_pdf = add_pdf_report_button(frm, db_path=DB_NAME, button_text="Generar PDF")
+    #     try:
+    #         btn_pdf.grid(row=24, column=2, pady=8)
+    #     except Exception:
+    #         pass
+    # except Exception:
+    #     # If creation fails, create a placeholder that shows an error when clicked
+    #     btn_pdf = ttk.Button(frm, text="Generar PDF", command=lambda: messagebox.showerror('Error', 'Reporte no disponible', parent=root))
+    #     try:
+    #         btn_pdf.grid(row=24, column=2, pady=8)
+    #     except Exception:
+    #         pass
 
     # Botón para reporte por depósito
-    btn_pdf_deposito = add_pdf_report_por_deposito_button(frm, db_path=DB_NAME, button_text="Reporte por Depósito")
-    try:
-        btn_pdf_deposito.grid(row=25, column=2, pady=8)
-    except Exception:
-        pass
+    # Comentado: botón de "Reporte por Depósito" (presente en el dropdown)
+    # btn_pdf_deposito = add_pdf_report_por_deposito_button(frm, db_path=DB_NAME, button_text="Reporte por Depósito")
+    # try:
+    #     btn_pdf_deposito.grid(row=25, column=2, pady=8)
+    # except Exception:
+    #     pass
 
     # Botón para reporte por contador
-    btn_pdf_contador = add_pdf_report_por_contador_button(frm, db_path=DB_NAME, button_text="Reporte por Contador")
-    try:
-        btn_pdf_contador.grid(row=26, column=2, pady=8)
-    except Exception:
-        pass
+    # Comentado: botón de "Reporte por Contador" (presente en el dropdown)
+    # btn_pdf_contador = add_pdf_report_por_contador_button(frm, db_path=DB_NAME, button_text="Reporte por Contador")
+    # try:
+    #     btn_pdf_contador.grid(row=26, column=2, pady=8)
+    # except Exception:
+    #     pass
 
     # Botón reporte de verificación (orden por id)
-    try:
-        from ui_pdf_report import add_pdf_report_verificacion_button
-        btn_pdf_verif = add_pdf_report_verificacion_button(frm, db_path=DB_NAME, button_text="Reporte Verificación")
-        try:
-            btn_pdf_verif.grid(row=27, column=2, pady=8)
-        except Exception:
-            pass
-    except Exception:
-        # if import fails, ignore
-        pass
+    # Comentado: botón de "Reporte Verificación" (presente en el dropdown)
+    # try:
+    #     from ui_pdf_report import add_pdf_report_verificacion_button
+    #     btn_pdf_verif = add_pdf_report_verificacion_button(frm, db_path=DB_NAME, button_text="Reporte Verificación")
+    #     try:
+    #         btn_pdf_verif.grid(row=27, column=2, pady=8)
+    #     except Exception:
+    #         pass
+    # except Exception:
+    #     # if import fails, ignore
+    #     pass
 
     # Botón reporte Verificación (solo con remarks)
-    try:
-        try:
-            from ui_pdf_report_resumen import add_pdf_report_verificacion_remarks_button as add_pdf_report_verificacion_remarks_button
-        except Exception:
-            from ui_pdf_report import add_pdf_report_verificacion_remarks_button
-        btn_pdf_verif_r = add_pdf_report_verificacion_remarks_button(frm, db_path=DB_NAME, button_text="Verificación (Remarks)")
-        try:
-            btn_pdf_verif_r.grid(row=27, column=3, pady=8)
-        except Exception:
-            pass
-    except Exception:
-        pass
+    # Comentado: botón de "Verificación (Remarks)" (presente en el dropdown)
+    # try:
+    #     try:
+    #         from ui_pdf_report_resumen import add_pdf_report_verificacion_remarks_button as add_pdf_report_verificacion_remarks_button
+    #     except Exception:
+    #         from ui_pdf_report import add_pdf_report_verificacion_remarks_button
+    #     btn_pdf_verif_r = add_pdf_report_verificacion_remarks_button(frm, db_path=DB_NAME, button_text="Verificación (Remarks)")
+    #     try:
+    #         btn_pdf_verif_r.grid(row=27, column=3, pady=8)
+    #     except Exception:
+    #         pass
+    # except Exception:
+    #     pass
 
     # Botón reporte de diferencias (por item y ubicación)
-    try:
-        from ui_pdf_report import add_pdf_report_diferencias_button
-        btn_pdf_diff = add_pdf_report_diferencias_button(frm, db_path=DB_NAME, button_text="Reporte Diferencias")
-        try:
-            btn_pdf_diff.grid(row=28, column=2, pady=8)
-        except Exception:
-            pass
-    except Exception:
-        pass
+    # Comentado: botón de "Reporte Diferencias" (presente en el dropdown)
+    # try:
+    #     from ui_pdf_report import add_pdf_report_diferencias_button
+    #     btn_pdf_diff = add_pdf_report_diferencias_button(frm, db_path=DB_NAME, button_text="Reporte Diferencias")
+    #     try:
+    #         btn_pdf_diff.grid(row=28, column=2, pady=8)
+    #     except Exception:
+    #         pass
+    # except Exception:
+    #     pass
 
     # Botón reporte Diferencias por Item (agrupa sólo por código)
-    try:
-        from ui_pdf_report import (
-            add_pdf_report_diferencias_por_item_button,
-            add_pdf_report_diferencias_threshold_button,
-            add_pdf_report_diferencias_por_counter_button,
-            add_pdf_report_diferencias_por_item_detalle_button,
-        )
-        btn_pdf_diff_item = add_pdf_report_diferencias_por_item_button(frm, db_path=DB_NAME, button_text="Diferencias por Item")
-        try:
-            btn_pdf_diff_item.grid(row=29, column=2, pady=8)
-        except Exception:
-            pass
-        # Button to show only differences with absolute value greater than given threshold
-        btn_pdf_diff_threshold = add_pdf_report_diferencias_threshold_button(frm, db_path=DB_NAME, button_text="Diferencias > X")
-        try:
-            btn_pdf_diff_threshold.grid(row=30, column=2, pady=8)
-        except Exception:
-            pass
-        # Button for differences grouped by counter, location and item
-        btn_pdf_diff_counter = add_pdf_report_diferencias_por_counter_button(frm, db_path=DB_NAME, button_text="Diferencias por Counter/Loc/Item")
-        try:
-            btn_pdf_diff_counter.grid(row=31, column=2, pady=8)
-        except Exception:
-            pass
-        # Button for differences summary from inventory_count_res
-        try:
-            try:
-                from ui_pdf_report_resumen import add_pdf_report_diferencias_resumen_button as add_pdf_report_diferencias_resumen_button
-            except Exception:
-                from ui_pdf_report import add_pdf_report_diferencias_resumen_button as add_pdf_report_diferencias_resumen_button
-            btn_pdf_diff_resum = add_pdf_report_diferencias_resumen_button(frm, db_path=DB_NAME, button_text="Diferencias Resumen")
-            try:
-                btn_pdf_diff_resum.grid(row=33, column=2, pady=8)
-            except Exception:
-                pass
-        except Exception:
-            pass
-        # Button for detailed differences per item (asks for item code)
-        try:
-            btn_pdf_diff_item_det = add_pdf_report_diferencias_por_item_detalle_button(frm, db_path=DB_NAME, button_text="Diferencias Item Detalle")
-            try:
-                btn_pdf_diff_item_det.grid(row=32, column=2, pady=8)
-            except Exception:
-                pass
-        except Exception:
-            pass
-    except Exception:
-        pass
+    # Comentado: botones relacionados con "Diferencias" y variantes (presentes en el dropdown)
+    # try:
+    #     from ui_pdf_report import (
+    #         add_pdf_report_diferencias_por_item_button,
+    #         add_pdf_report_diferencias_threshold_button,
+    #         add_pdf_report_diferencias_por_counter_button,
+    #         add_pdf_report_diferencias_por_item_detalle_button,
+    #     )
+    #     btn_pdf_diff_item = add_pdf_report_diferencias_por_item_button(frm, db_path=DB_NAME, button_text="Diferencias por Item")
+    #     try:
+    #         btn_pdf_diff_item.grid(row=29, column=2, pady=8)
+    #     except Exception:
+    #         pass
+    #     # Button to show only differences with absolute value greater than given threshold
+    #     btn_pdf_diff_threshold = add_pdf_report_diferencias_threshold_button(frm, db_path=DB_NAME, button_text="Diferencias > X")
+    #     try:
+    #         btn_pdf_diff_threshold.grid(row=30, column=2, pady=8)
+    #     except Exception:
+    #         pass
+    #     # Button for differences grouped by counter, location and item
+    #     btn_pdf_diff_counter = add_pdf_report_diferencias_por_counter_button(frm, db_path=DB_NAME, button_text="Diferencias por Counter/Loc/Item")
+    #     try:
+    #         btn_pdf_diff_counter.grid(row=31, column=2, pady=8)
+    #     except Exception:
+    #         pass
+    #     # Button for differences summary from inventory_count_res
+    #     try:
+    #         try:
+    #             from ui_pdf_report_resumen import add_pdf_report_diferencias_resumen_button as add_pdf_report_diferencias_resumen_button
+    #         except Exception:
+    #             from ui_pdf_report import add_pdf_report_diferencias_resumen_button as add_pdf_report_diferencias_resumen_button
+    #         btn_pdf_diff_resum = add_pdf_report_diferencias_resumen_button(frm, db_path=DB_NAME, button_text="Diferencias Resumen")
+    #         try:
+    #             btn_pdf_diff_resum.grid(row=33, column=2, pady=8)
+    #         except Exception:
+    #             pass
+    #     except Exception:
+    #         pass
+    #     # Button for detailed differences per item (asks for item code)
+    #     try:
+    #         btn_pdf_diff_item_det = add_pdf_report_diferencias_por_item_detalle_button(frm, db_path=DB_NAME, button_text="Diferencias Item Detalle")
+    #         try:
+    #             btn_pdf_diff_item_det.grid(row=32, column=2, pady=8)
+    #         except Exception:
+    #             pass
+    #     except Exception:
+    #         pass
+    # except Exception:
+    #     pass
 
     # --- Callbacks principales (adaptados) ---
     def import_catalog():

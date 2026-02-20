@@ -416,7 +416,7 @@ def mostrar_registros():
 init_db()
 
 root = tk.Tk()
-root.title("VLM Inventary")
+root.title("Inventario VLM — CJ Electrical Supply (Draft Version)")
 # Ventana más compacta
 root.geometry("480x360")
 

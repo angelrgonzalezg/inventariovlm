@@ -91,7 +91,7 @@ def main():
     # ...widgets...
     # (los binds van después de crear los widgets, sin indentación extra)
     root = tk.Tk()
-    root.title("VLM Inventary")
+    root.title("Inventario VLM — CJ Electrical Supply (Draft Version)")
     root.geometry("640x420")
 
     # --- Widgets principales ---
