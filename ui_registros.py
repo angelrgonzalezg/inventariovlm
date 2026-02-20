@@ -156,8 +156,44 @@ def mostrar_registros(root):
     # Filtro por código
     lbl_filter = ttk.Label(frm, text="Filtrar código:")
     edit_filter = ttk.Entry(frm, width=12)
-    btn_filter = ttk.Button(frm, text="Filtrar", command=lambda: cargar_datos(filter_code=edit_filter.get().strip() or None))
-    btn_clear = ttk.Button(frm, text="Limpiar filtro", command=lambda: (edit_filter.delete(0, tk.END), cargar_datos()))
+    def _on_filter():
+        filter_text = edit_filter.get().strip()
+        try:
+            current_code = edit_code.get().strip()
+        except Exception:
+            current_code = ''
+        # clear the edit-line selection only if the filter differs from the selected code
+        if filter_text != current_code:
+            _clear_selection()
+        cargar_datos(filter_code=filter_text or None)
+    btn_filter = ttk.Button(frm, text="Filtrar", command=_on_filter)
+    def _clear_selection():
+        # Clear all edit fields to avoid confusion after clearing filter
+        for w in (edit_counter, edit_code, edit_desc, edit_boxqty, edit_boxunitqty, edit_boxunittotal,
+                  edit_mag, edit_win, edit_total, edit_current, edit_diff, edit_location, edit_date):
+            try:
+                w.config(state="normal")
+                w.delete(0, tk.END)
+                # restore readonly where appropriate
+                if w in (edit_desc, edit_boxunittotal, edit_total, edit_current, edit_diff):
+                    w.config(state="readonly")
+            except Exception:
+                pass
+        try:
+            edit_deposit.set("")
+        except Exception:
+            pass
+        try:
+            edit_rack['values'] = []
+            edit_rack.set("")
+        except Exception:
+            pass
+        try:
+            status_total.config(text="")
+        except Exception:
+            pass
+
+    btn_clear = ttk.Button(frm, text="Limpiar filtro", command=lambda: (edit_filter.delete(0, tk.END), _clear_selection(), cargar_datos()))
 
     # racks_list se actualizará dinámicamente
     racks_list = []
@@ -407,8 +443,36 @@ def mostrar_registros(root):
                 edit_deposit.set("")
                 edit_rack['values'] = []
                 edit_rack.set("")
+        # also update the quick filter field to the selected code to make filtering/selection consistent
+        try:
+            edit_filter.delete(0, tk.END)
+            edit_filter.insert(0, code_val)
+        except Exception:
+            pass
 
     tree.bind("<<TreeviewSelect>>", on_seleccionar)
+
+    def _on_double_click(event=None):
+        sel = tree.focus()
+        if not sel:
+            return
+        vals = tree.item(sel, "values")
+        if not vals:
+            return
+        # code is at index 6 in this view
+        try:
+            code_val = vals[6]
+        except Exception:
+            code_val = None
+        if code_val:
+            try:
+                edit_filter.delete(0, tk.END)
+                edit_filter.insert(0, code_val)
+            except Exception:
+                pass
+            cargar_datos(filter_code=code_val)
+
+    tree.bind("<Double-1>", _on_double_click)
 
     def actualizar_registro():
         sel = tree.focus()
@@ -892,8 +956,28 @@ def mostrar_registros_resumen(root):
 
     lbl_filter = ttk.Label(frm, text="Filtrar código:")
     edit_filter = ttk.Entry(frm, width=12)
-    btn_filter = ttk.Button(frm, text="Filtrar", command=lambda: cargar_datos(filter_code=edit_filter.get().strip() or None))
-    btn_clear = ttk.Button(frm, text="Limpiar filtro", command=lambda: (edit_filter.delete(0, tk.END), cargar_datos()))
+    def _on_filter_resumen():
+        filter_text = edit_filter.get().strip()
+        try:
+            current_code = edit_code.get().strip()
+        except Exception:
+            current_code = ''
+        if filter_text != current_code:
+            _clear_selection_resumen()
+        cargar_datos(filter_code=filter_text or None)
+    btn_filter = ttk.Button(frm, text="Filtrar", command=_on_filter_resumen)
+    def _clear_selection_resumen():
+        for w in (edit_code, edit_desc, edit_boxqty, edit_boxunitqty, edit_boxunittotal, edit_mag, edit_win,
+                  edit_total, edit_current, edit_diff, edit_updated):
+            try:
+                w.config(state="normal")
+                w.delete(0, tk.END)
+                if w in (edit_desc, edit_boxunittotal, edit_total, edit_current, edit_diff):
+                    w.config(state="readonly")
+            except Exception:
+                pass
+
+    btn_clear = ttk.Button(frm, text="Limpiar filtro", command=lambda: (edit_filter.delete(0, tk.END), _clear_selection_resumen(), cargar_datos()))
 
     edit_code.grid(row=0, column=0, padx=2, pady=2)
     edit_desc.grid(row=0, column=1, padx=2, pady=2)
@@ -978,8 +1062,36 @@ def mostrar_registros_resumen(root):
         edit_current.config(state="normal"); edit_current.delete(0, tk.END); edit_current.insert(0, vals[9]); edit_current.config(state="readonly")
         edit_diff.config(state="normal"); edit_diff.delete(0, tk.END); edit_diff.insert(0, vals[10]); edit_diff.config(state="readonly")
         edit_updated.delete(0, tk.END); edit_updated.insert(0, vals[11])
+        # keep the filter field in sync with the selected code for convenience
+        try:
+            edit_filter.delete(0, tk.END)
+            edit_filter.insert(0, vals[1])
+        except Exception:
+            pass
 
     tree.bind("<<TreeviewSelect>>", on_seleccionar)
+
+    def _on_double_click_resumen(event=None):
+        sel = tree.focus()
+        if not sel:
+            return
+        vals = tree.item(sel, "values")
+        if not vals:
+            return
+        # code is at index 1 in resumen view
+        try:
+            code_val = vals[1]
+        except Exception:
+            code_val = None
+        if code_val:
+            try:
+                edit_filter.delete(0, tk.END)
+                edit_filter.insert(0, code_val)
+            except Exception:
+                pass
+            cargar_datos(filter_code=code_val)
+
+    tree.bind("<Double-1>", _on_double_click_resumen)
 
     def actualizar_registro():
         sel = tree.focus()

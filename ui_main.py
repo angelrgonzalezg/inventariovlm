@@ -8,8 +8,11 @@ from datetime import datetime
 import sys
 import os
 import sqlite3
-import sys
-import os
+import logging
+
+# Basic logging configuration: change to DEBUG during development to enable debug messages
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
+logger = logging.getLogger(__name__)
 
 # Resolve database path so the frozen executable finds the DB next to the exe.
 if getattr(sys, "frozen", False):
@@ -649,6 +652,10 @@ def main():
     lbl_location = ttk.Label(frm, text="")
     lbl_location.grid(row=11, column=1, sticky="w")
 
+    # Current inventory label (used by buscar_item)
+    lbl_current = ttk.Label(frm, text="Inventario actual: ")
+    lbl_current.grid(row=12, column=0, sticky="w")
+
     # Inventario actual
     ##lbl_current = ttk.Label(frm, text="Inventario actual: ")
     ##lbl_current.grid(row=12, column=0, sticky="w")
@@ -676,6 +683,72 @@ def main():
     btn_import.grid(row=21, column=0, pady=8)
     btn_buscar = ttk.Button(frm, text="Buscar", command=lambda: buscar_item())
     btn_buscar.grid(row=21, column=1, pady=8)
+
+    # Disable Guardar until required fields are filled (counter, deposit, rack, date)
+    def update_guardar_state(event=None):
+        try:
+            # counter must be non-empty
+            counter_ok = bool(combo_name.get().strip())
+        except Exception:
+            counter_ok = False
+        try:
+            dep_ok = combo_deposit.current() >= 0
+        except Exception:
+            dep_ok = False
+        try:
+            rack_ok = combo_rack.current() >= 0
+        except Exception:
+            rack_ok = False
+        try:
+            # DateEntry provides get_date(); if not set, treat as not ok
+            d = date_entry.get_date()
+            date_ok = d is not None
+        except Exception:
+            date_ok = False
+
+        if counter_ok and dep_ok and rack_ok and date_ok:
+            try:
+                btn_guardar.state(['!disabled'])
+            except Exception:
+                btn_guardar.config(state='normal')
+        else:
+            try:
+                btn_guardar.state(['disabled'])
+            except Exception:
+                btn_guardar.config(state='disabled')
+
+    # Bind changes to controls to update the Guardar button state
+    try:
+        combo_name.bind('<<ComboboxSelected>>', update_guardar_state)
+    except Exception:
+        try:
+            combo_name.bind('<KeyRelease>', update_guardar_state)
+        except Exception:
+            pass
+    try:
+        combo_deposit.bind('<<ComboboxSelected>>', update_guardar_state)
+    except Exception:
+        try:
+            combo_deposit.bind('<FocusOut>', update_guardar_state)
+        except Exception:
+            pass
+    try:
+        combo_rack.bind('<<ComboboxSelected>>', update_guardar_state)
+    except Exception:
+        try:
+            combo_rack.bind('<FocusOut>', update_guardar_state)
+        except Exception:
+            pass
+    try:
+        date_entry.bind('<<DateEntrySelected>>', update_guardar_state)
+    except Exception:
+        try:
+            date_entry.bind('<FocusOut>', update_guardar_state)
+        except Exception:
+            pass
+
+    # Initial state
+    update_guardar_state()
     # Botón para actualizar 'current_inventory' en la tabla 'items' desde un CSV
     def actualizar_current_inventory_from_csv(file_path=None):
         # Prompt for file if not provided
@@ -928,6 +1001,8 @@ def main():
         "Reporte Diferencias > X",
         "Reporte Diferencias por Counter-Loc-Item",
         "Reporte Diferencia Item Detalle",
+        "Reporte Inventario por Ubicacion",
+        "Reporte Item Conteo",
     ]
     cmb_rpt_main = ttk.Combobox(frm, values=rpt_options, state="readonly", width=36)
     cmb_rpt_main.set(rpt_options[0])
@@ -973,6 +1048,27 @@ def main():
                 rpt.generate_pdf_report_diferencias_por_counter(root, db_path=DB_NAME)
             elif "diferenciasporitems" in key or "poritem" in key:
                 rpt.generate_pdf_report_diferencias_por_item(root, db_path=DB_NAME)
+            elif "itemconteo" in key:
+                fn = getattr(rpt, 'generate_pdf_report_item_conteo', None)
+                if fn is not None:
+                    fn(root, db_path=DB_NAME)
+                else:
+                    try:
+                        import ui_pdf_report_resumen as rpt_res
+                        rpt_res.generate_pdf_report_item_conteo(root, db_path=DB_NAME)
+                    except Exception:
+                        raise
+            elif "inventario" in key and "ubicacion" in key:
+                # Prefer implementation on main rpt module if present, otherwise use resumen module
+                fn = getattr(rpt, 'generate_pdf_report_inventario_por_ubicacion', None)
+                if fn is not None:
+                    fn(root, db_path=DB_NAME)
+                else:
+                    try:
+                        import ui_pdf_report_resumen as rpt_res
+                        rpt_res.generate_pdf_report_inventario_por_ubicacion(root, db_path=DB_NAME)
+                    except Exception:
+                        raise
             elif "sincodigo" in key or "registrossincodigo" in key or "nocode" in key:
                 # prefer function on loaded module, otherwise call the resumen module
                 fn = getattr(rpt, 'generate_pdf_report_nocode_items', None)
@@ -997,33 +1093,29 @@ def main():
             elif "resumen" in key or "inventory_count_res" in key:
                 # Always use the standalone resumen implementation to ensure it includes the updated columns
                 try:
-                    print('DEBUG: ui_main will try ui_pdf_report_resumen for diferencias resumen')
-                    try:
-                        messagebox.showinfo('Debug', 'Llamando a ui_pdf_report_resumen.generate_pdf_report_diferencias_resumen', parent=root)
-                    except Exception:
-                        pass
-                    print('DEBUG: attempting import ui_pdf_report_resumen')
+                    logger.debug('ui_main will try ui_pdf_report_resumen for diferencias resumen')
+                    logger.debug('Calling ui_pdf_report_resumen.generate_pdf_report_diferencias_resumen')
                     import ui_pdf_report_resumen as rpt_res
-                    print('DEBUG: import succeeded; has func =', hasattr(rpt_res, 'generate_pdf_report_diferencias_resumen'))
+                    logger.debug('import succeeded; has func = %s', hasattr(rpt_res, 'generate_pdf_report_diferencias_resumen'))
                     try:
                         rpt_res.generate_pdf_report_diferencias_resumen(root, db_path=DB_NAME)
-                        print('DEBUG: call to rpt_res.generate_pdf_report_diferencias_resumen returned normally')
-                    except Exception as e_call:
-                        print('DEBUG: exception calling rpt_res.generate_pdf_report_diferencias_resumen:', e_call)
+                        logger.debug('call to rpt_res.generate_pdf_report_diferencias_resumen returned normally')
+                    except Exception:
+                        logger.exception('exception calling rpt_res.generate_pdf_report_diferencias_resumen')
                         raise
                 except Exception as e:
-                    print('DEBUG: ui_pdf_report_resumen import/call failed:', e)
+                    logger.exception('ui_pdf_report_resumen import/call failed')
                     # fallback: try the loaded module's implementation if resumen module fails
                     fn = getattr(rpt, "generate_pdf_report_diferencias_resumen", None)
                     if fn is not None:
                         try:
-                            print('DEBUG: falling back to rpt.generate_pdf_report_diferencias_resumen')
+                            logger.debug('falling back to rpt.generate_pdf_report_diferencias_resumen')
                             fn(root, db_path=DB_NAME)
-                        except Exception as e_f:
-                            print('DEBUG: fallback rpt.generate_pdf_report_diferencias_resumen raised:', e_f)
+                        except Exception:
+                            logger.exception('fallback rpt.generate_pdf_report_diferencias_resumen raised')
                             raise
                     else:
-                        print('DEBUG: no fallback function found on rpt; re-raising')
+                        logger.debug('no fallback function found on rpt; re-raising')
                         raise
             elif "diferenciaitemdetalle" in key or "itemdetalle" in key:
                 rpt.generate_pdf_report_diferencias_item_detalle(root, db_path=DB_NAME)
@@ -1213,27 +1305,132 @@ def main():
 
     def buscar_item(event=None):
         code = entry_code.get().strip()
+        logger.debug("buscar_item invoked, raw entry: '%s'", entry_code.get())
+        logger.debug("buscar_item: stripped code -> '%s'", code)
         if not code:
+            logger.debug('buscar_item: empty code, returning')
             return
         conn = sqlite3.connect(DB_NAME)
         cur = conn.cursor()
         cur.execute("SELECT description_item, current_inventory FROM items WHERE code_item = ?", (code,))
         row = cur.fetchone()
+        logger.debug('buscar_item: query result row=%s', row)
         if not row:
             alt = code.lstrip("0")
             if alt:
                 cur.execute("SELECT description_item, current_inventory FROM items WHERE code_item = ?", (alt,))
                 row = cur.fetchone()
+                logger.debug('buscar_item: alt query result row=%s alt=%s', row, alt)
         # Si ya existen registros para este code_item, mostrar ventana de confirmación
         cur.execute("SELECT * FROM inventory_count WHERE code_item = ? ORDER BY count_date, counter_name, deposit_id, rack_id", (code,))
         existing = cur.fetchall()
+        logger.debug("buscar_item: found %d existing inventory_count rows for code '%s'", len(existing), code)
+        # If we have item info, show the details modal first so the user can inspect existing records
+        if row:
+            try:
+                logger.debug("buscar_item: preparing details modal for code '%s' (pre-prompt)", code)
+                conn2 = sqlite3.connect(DB_NAME)
+                cur2 = conn2.cursor()
+                cur2.execute("SELECT counter_name, count_date, deposit_id, rack_id, total, remarks FROM inventory_count WHERE code_item = ? ORDER BY count_date DESC", (code,))
+                inv_rows = cur2.fetchall()
+                cur2.execute("SELECT COALESCE(SUM(sales_qty),0) FROM sales WHERE code_item = ?", (code,))
+                sales_sum = cur2.fetchone()[0] or 0
+                cur2.execute("SELECT COALESCE(SUM(purchasing_qty),0) FROM purchasing WHERE code_item = ?", (code,))
+                purch_sum = cur2.fetchone()[0] or 0
+                conn2.close()
+
+                win = tk.Toplevel(root)
+                win.title(f"Detalle Item {code}")
+                win.transient(root)
+                try:
+                    win.grab_set()
+                except Exception:
+                    pass
+
+                frm_d = ttk.Frame(win, padding=8)
+                frm_d.pack(fill='both', expand=True)
+
+                ttk.Label(frm_d, text=f"Código: {code}", font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, sticky='w')
+                ttk.Label(frm_d, text=f"Descripción: {row[0]}").grid(row=1, column=0, sticky='w')
+                ttk.Label(frm_d, text=f"Inventario actual: {row[1]}").grid(row=2, column=0, sticky='w')
+                ttk.Label(frm_d, text=f"Ventas (suma): {sales_sum}").grid(row=0, column=1, sticky='w', padx=12)
+                ttk.Label(frm_d, text=f"Compras (suma): {purch_sum}").grid(row=1, column=1, sticky='w', padx=12)
+
+                ttk.Separator(frm_d, orient='horizontal').grid(row=3, column=0, columnspan=2, sticky='ew', pady=(6,6))
+
+                ttk.Label(frm_d, text='Registros en inventory_count (últimos):').grid(row=4, column=0, columnspan=2, sticky='w')
+
+                cols = ('contador', 'fecha', 'deposit_id', 'rack_id', 'total', 'remarks')
+                tree = ttk.Treeview(frm_d, columns=cols, show='headings', height=8)
+                for c in cols:
+                    tree.heading(c, text=c)
+                    tree.column(c, width=100, anchor='w')
+                tree.grid(row=5, column=0, columnspan=2, sticky='nsew', pady=(4,4))
+
+                for r in inv_rows:
+                    tree.insert('', 'end', values=(r[0] or '', r[1] or '', r[2] or '', r[3] or '', r[4] or 0, (r[5] or '')[:60]))
+
+                btnf = ttk.Frame(frm_d)
+                btnf.grid(row=6, column=0, columnspan=2, pady=(8,0))
+                ttk.Button(btnf, text='Cerrar', command=win.destroy).pack()
+
+                try:
+                    pw = root.winfo_rootx(); ph = root.winfo_rooty()
+                    win.geometry('+%d+%d' % (pw+60, ph+60))
+                except Exception:
+                    pass
+                try:
+                    win.lift()
+                    win.focus_force()
+                except Exception:
+                    pass
+                try:
+                    win.wait_window()
+                except Exception:
+                    pass
+            except Exception:
+                logger.exception('buscar_item: error showing details modal (pre-prompt)')
         if existing:
+            # Determine if adding is allowed: counter, deposit, rack and date must be provided
+            try:
+                counter_ok = bool(combo_name.get().strip())
+            except Exception:
+                counter_ok = False
+            try:
+                dep_ok = combo_deposit.current() >= 0
+            except Exception:
+                dep_ok = False
+            try:
+                rack_ok = combo_rack.current() >= 0
+            except Exception:
+                rack_ok = False
+            try:
+                date_ok = date_entry.get_date() is not None
+            except Exception:
+                date_ok = False
+
+            if not (counter_ok and dep_ok and rack_ok and date_ok):
+                # Do not follow the add-record flow from Buscar; inform user and return to code entry
+                try:
+                    messagebox.showinfo("Registro existente", "Ya existen registros para este código. Completa Contador, Depósito, Rack y Fecha si deseas agregar un nuevo registro.", parent=root)
+                except Exception:
+                    try:
+                        messagebox.showinfo("Registro existente", "Ya existen registros para este código. Completa Contador, Depósito, Rack y Fecha si deseas agregar un nuevo registro.")
+                    except Exception:
+                        pass
+                conn.close()
+                entry_code.focus_set()
+                entry_code.selection_range(0, tk.END)
+                return
+
+            # If allowed to add, ask the usual confirmation
             info = '\n'.join([
                 f"FECHA: {r[8]}, CONTADOR: {r[1]}, DEPÓSITO: {r[10]}, RACK: {r[11]}, TOTAL: {r[5]}" for r in existing
             ])
             respuesta = messagebox.askyesno(
                 "Registro existente",
-                f"Ya existe(n) registro(s) con CODE_ITEM '{code}':\n\n{info}\n\n¿Deseas agregar el nuevo registro igualmente?"
+                f"Ya existe(n) registro(s) con CODE_ITEM '{code}':\n\n{info}\n\n¿Deseas agregar el nuevo registro igualmente?",
+                parent=root
             )
             if not respuesta:
                 conn.close()
@@ -1241,18 +1438,7 @@ def main():
                 entry_code.selection_range(0, tk.END)
                 return
         conn.close()
-        if row:
-            entry_desc.config(state="normal")
-            entry_desc.delete(0, tk.END)
-            entry_desc.insert(0, row[0])
-            entry_desc.config(state="readonly")
-            lbl_current.config(text=f"Inventario actual: {row[1]}")
-            entry_boxqty.focus_set()
-            try:
-                entry_boxqty.selection_range(0, tk.END)
-            except Exception:
-                pass
-        else:
+        if not row:
             messagebox.showerror("Error", "Código no encontrado")
             entry_code.focus_set()
 

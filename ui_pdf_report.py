@@ -25,6 +25,21 @@ from tkinter import filedialog, messagebox
 DEFAULT_DB = "inventariovlm.db"
 
 
+def _fmt_int(x):
+    """Format a value as integer with thousands separator (dot).
+
+    Accepts numbers or strings; returns a string.
+    """
+    try:
+        n = int(round(float(x)))
+    except Exception:
+        try:
+            n = int(x)
+        except Exception:
+            n = 0
+    return f"{n:,}".replace(',', '.')
+
+
 def _open_pdf_file(file_path: str, parent: Optional[object] = None) -> bool:
     """Open a PDF file using a platform-appropriate command.
 
@@ -234,14 +249,14 @@ def generate_pdf_report(parent, db_path: str = DEFAULT_DB):
                     r[1] or "",
                     r[2] or "",
                     (r[3] or "")[:60],
-                    str(r[4] or 0),
-                    str(r[5] or 0),
-                    str(r[6] or 0),
-                    str(r[7] or 0),
-                    str(r[8] or 0),
-                    str(r[9] or 0),
-                    str(r[10] or 0),
-                    str(r[11] or 0),
+                    _fmt_int(r[4] or 0),
+                    _fmt_int(r[5] or 0),
+                    _fmt_int(r[6] or 0),
+                    _fmt_int(r[7] or 0),
+                    _fmt_int(r[8] or 0),
+                    _fmt_int(r[9] or 0),
+                    _fmt_int(r[10] or 0),
+                    _fmt_int(r[11] or 0),
                     r[14] or "",
                     r[15] or ""
                 ])
@@ -255,6 +270,18 @@ def generate_pdf_report(parent, db_path: str = DEFAULT_DB):
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ])
+            # detect numeric headers and right-align those columns
+            try:
+                hdrs = data[0] if data else []
+                numeric_keys = ('total', 'caja', 'cajas', 'inventario', 'actual', 'sueltos', 'sales', 'purchas', 'qty', 'cant', 'magazijn', 'winkel', 'tot', 'dif', 'difer', 'difference')
+                ncols = [i for i, h in enumerate(hdrs) if any(k in str(h).lower() for k in numeric_keys)]
+                for i in ncols:
+                    try:
+                        tbl_style.add('ALIGN', (i, 1), (i, -1), 'RIGHT')
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             table.setStyle(tbl_style)
             story.append(table)
             story.append(Spacer(1, 8))
@@ -508,6 +535,17 @@ def generate_pdf_report_por_contador(parent, db_path: str = DEFAULT_DB):
                     ("LEFTPADDING", (0, 0), (-1, -1), 4),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                 ])
+                try:
+                    hdrs = data[0] if data else []
+                    numeric_keys = ('total', 'caja', 'cajas', 'inventario', 'actual', 'sueltos', 'sales', 'purchas', 'qty', 'cant', 'magazijn', 'winkel', 'tot', 'dif', 'difer', 'difference')
+                    ncols = [i for i, h in enumerate(hdrs) if any(k in str(h).lower() for k in numeric_keys)]
+                    for i in ncols:
+                        try:
+                            tbl_style.add('ALIGN', (i, 1), (i, -1), 'RIGHT')
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 table.setStyle(tbl_style)
                 story.append(table)
                 story.append(Spacer(1, 8))
@@ -587,14 +625,24 @@ def generate_pdf_report_diferencias_resumen(parent, db_path: str = DEFAULT_DB):
     headers = ['Código', 'Descripción', 'Total', 'Sales', 'Purchasing', 'Total_calc', 'Diferencia']
     data = [headers]
     for r in rows:
+        def _fmt_int(x):
+            try:
+                n = int(round(float(x)))
+            except Exception:
+                try:
+                    n = int(x)
+                except Exception:
+                    n = 0
+            return f"{n:,}".replace(",", ".")
+
         data.append([
             r[0] or '',
             (r[1] or '')[:200],
-            str(r[2] or 0),
-            str(r[3] or 0),
-            str(r[4] or 0),
-            str(r[5] or 0),
-            str(abs(r[6] or 0))
+            _fmt_int(r[2]),
+            _fmt_int(r[3]),
+            _fmt_int(r[4]),
+            _fmt_int(r[5]),
+            _fmt_int(abs(r[6] or 0))
         ])
 
     if len(data) == 1:
@@ -610,6 +658,17 @@ def generate_pdf_report_diferencias_resumen(parent, db_path: str = DEFAULT_DB):
             ('LEFTPADDING', (0, 0), (-1, -1), 4),
             ('RIGHTPADDING', (0, 0), (-1, -1), 4),
         ])
+        try:
+            hdrs = data[0] if data else []
+            numeric_keys = ('total', 'caja', 'cajas', 'inventario', 'actual', 'sueltos', 'sales', 'purchas', 'qty', 'cant', 'magazijn', 'winkel', 'tot', 'dif', 'difer', 'difference')
+            ncols = [i for i, h in enumerate(hdrs) if any(k in str(h).lower() for k in numeric_keys)]
+            for i in ncols:
+                try:
+                    tbl_style.add('ALIGN', (i, 1), (i, -1), 'RIGHT')
+                except Exception:
+                    pass
+        except Exception:
+            pass
         table.setStyle(tbl_style)
         story.append(table)
 
@@ -734,6 +793,17 @@ def generate_pdf_report_por_deposito(parent, db_path: str = DEFAULT_DB):
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ])
+            try:
+                hdrs = data[0] if data else []
+                numeric_keys = ('total', 'caja', 'cajas', 'inventario', 'actual', 'sueltos', 'sales', 'purchas', 'qty', 'cant', 'magazijn', 'winkel', 'tot', 'dif', 'difer', 'difference')
+                ncols = [i for i, h in enumerate(hdrs) if any(k in str(h).lower() for k in numeric_keys)]
+                for i in ncols:
+                    try:
+                        tbl_style.add('ALIGN', (i, 1), (i, -1), 'RIGHT')
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             table.setStyle(tbl_style)
             story.append(table)
             story.append(Spacer(1, 8))
@@ -972,6 +1042,17 @@ def generate_pdf_report_verificacion(parent, db_path: str = DEFAULT_DB):
                     ("LEFTPADDING", (0, 0), (-1, -1), 4),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                 ])
+                try:
+                    hdrs = data[0] if data else []
+                    numeric_keys = ('total', 'caja', 'cajas', 'inventario', 'actual', 'sueltos', 'sales', 'purchas', 'qty', 'cant', 'magazijn', 'winkel', 'tot', 'dif', 'difer', 'difference')
+                    ncols = [i for i, h in enumerate(hdrs) if any(k in str(h).lower() for k in numeric_keys)]
+                    for i in ncols:
+                        try:
+                            tbl_style.add('ALIGN', (i, 1), (i, -1), 'RIGHT')
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 table.setStyle(tbl_style)
                 story.append(table)
                 story.append(Spacer(1, 8))
@@ -1185,14 +1266,14 @@ def generate_pdf_report(parent, db_path=DEFAULT_DB):
                     r[1] or "",
                     r[2] or "",
                     (r[3] or "")[:60],
-                    str(r[4] or 0),
-                    str(r[5] or 0),
-                    str(r[6] or 0),
-                    str(r[7] or 0),
-                    str(r[8] or 0),
-                    str(r[9] or 0),
-                    str(r[10] or 0),
-                    str(r[11] or 0),
+                    _fmt_int(r[4] or 0),
+                    _fmt_int(r[5] or 0),
+                    _fmt_int(r[6] or 0),
+                    _fmt_int(r[7] or 0),
+                    _fmt_int(r[8] or 0),
+                    _fmt_int(r[9] or 0),
+                    _fmt_int(r[10] or 0),
+                    _fmt_int(r[11] or 0),
                     r[14] or "",
                     r[15] or ""
                 ])
@@ -1207,6 +1288,17 @@ def generate_pdf_report(parent, db_path=DEFAULT_DB):
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ])
+            try:
+                hdrs = data[0] if data else []
+                numeric_keys = ('total', 'caja', 'cajas', 'inventario', 'actual', 'sueltos', 'sales', 'purchas', 'qty', 'cant', 'magazijn', 'winkel', 'tot', 'dif', 'difer', 'difference')
+                ncols = [i for i, h in enumerate(hdrs) if any(k in str(h).lower() for k in numeric_keys)]
+                for i in ncols:
+                    try:
+                        tbl_style.add('ALIGN', (i, 1), (i, -1), 'RIGHT')
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             table.setStyle(tbl_style)
             story.append(table)
             story.append(Spacer(1, 8))
@@ -1297,11 +1389,11 @@ def generate_pdf_report_diferencias(parent, db_path: str = DEFAULT_DB):
             r[0] or "",
             r[1] or "",
             (r[2] or "")[:80],
-            str(r[3] or 0),
-            str(r[4] or 0),
-            str(r[5] or 0),
-            str(r[6] or 0),
-            str(r[7] or 0),
+            _fmt_int(r[3] or 0),
+            _fmt_int(r[4] or 0),
+            _fmt_int(r[5] or 0),
+            _fmt_int(r[6] or 0),
+            _fmt_int(r[7] or 0),
         ])
 
     # Table column widths tuned for landscape A4
@@ -1316,6 +1408,17 @@ def generate_pdf_report_diferencias(parent, db_path: str = DEFAULT_DB):
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
     ])
+    try:
+        hdrs = data[0] if data else []
+        numeric_keys = ('total', 'caja', 'cajas', 'inventario', 'actual', 'sueltos', 'sales', 'purchas', 'qty', 'cant', 'magazijn', 'winkel', 'tot', 'dif', 'difer', 'difference')
+        ncols = [i for i, h in enumerate(hdrs) if any(k in str(h).lower() for k in numeric_keys)]
+        for i in ncols:
+            try:
+                tbl_style.add('ALIGN', (i, 1), (i, -1), 'RIGHT')
+            except Exception:
+                pass
+    except Exception:
+        pass
     table.setStyle(tbl_style)
     story.append(table)
 
@@ -1413,28 +1516,39 @@ def generate_pdf_report_verificacion(parent, db_path=DEFAULT_DB):
                 for r in items:
                     # r contains fields as selected above, with remarks at the end
                     data.append([
-                        r[3] or "",
-                        r[4] or "",
-                        (r[5] or "")[:60],
-                        str(r[6] or 0),
-                        str(r[7] or 0),
-                        str(r[8] or 0),
-                        str(r[9] or 0),
-                        str(r[10] or 0),
-                        str(r[11] or ""),
-                        (r[12] or "")[:120]
+                            r[3] or "",
+                            r[4] or "",
+                            (r[5] or "")[:60],
+                            _fmt_int(r[6] or 0),
+                            _fmt_int(r[7] or 0),
+                            _fmt_int(r[8] or 0),
+                            _fmt_int(r[9] or 0),
+                            _fmt_int(r[10] or 0),
+                            str(r[11] or ""),
+                            (r[12] or "")[:120]
+                        ])
+                    table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[90, 60, 140, 35, 40, 45, 45, 45, 30, 120])
+                    tbl_style = TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d3d3d3")),
+                        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("FONTSIZE", (0, 0), (-1, -1), 8),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                     ])
-                table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[90, 60, 140, 35, 40, 45, 45, 45, 30, 120])
-                tbl_style = TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d3d3d3")),
-                    ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                ])
-                table.setStyle(tbl_style)
+                    try:
+                        hdrs = data[0] if data else []
+                        numeric_keys = ('total', 'caja', 'cajas', 'inventario', 'actual', 'sueltos', 'sales', 'purchas', 'qty', 'cant', 'magazijn', 'winkel', 'tot', 'dif', 'difer', 'difference')
+                        ncols = [i for i, h in enumerate(hdrs) if any(k in str(h).lower() for k in numeric_keys)]
+                        for i in ncols:
+                            try:
+                                tbl_style.add('ALIGN', (i, 1), (i, -1), 'RIGHT')
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    table.setStyle(tbl_style)
                 story.append(table)
                 story.append(Spacer(1, 8))
         if ci < len(grouped) - 1:
@@ -1646,11 +1760,11 @@ def generate_pdf_report_diferencias_item_detalle(parent, db_path: str = DEFAULT_
             for loc, it in items:
                 data.append([
                     loc,
-                    str(it["en_cajas"]),
-                    str(it["sueltos"]),
-                    str(it["total"]),
-                    str(it["actual"]),
-                    str(it["diferencia"]) if it.get("diferencia") is not None else "",
+                    _fmt_int(it.get("en_cajas", 0)),
+                    _fmt_int(it.get("sueltos", 0)),
+                    _fmt_int(it.get("total", 0)),
+                    _fmt_int(it.get("actual", 0)),
+                    _fmt_int(it.get("diferencia", 0)) if it.get("diferencia") is not None else "",
                 ])
 
             table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[300, 60, 60, 60, 60, 60])
@@ -1663,6 +1777,17 @@ def generate_pdf_report_diferencias_item_detalle(parent, db_path: str = DEFAULT_
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ])
+            try:
+                hdrs = data[0] if data else []
+                numeric_keys = ('total', 'caja', 'cajas', 'inventario', 'actual', 'sueltos', 'sales', 'purchas', 'qty', 'cant', 'magazijn', 'winkel', 'tot')
+                ncols = [i for i, h in enumerate(hdrs) if any(k in str(h).lower() for k in numeric_keys)]
+                for i in ncols:
+                    try:
+                        tbl_style.add('ALIGN', (i, 1), (i, -1), 'RIGHT')
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             table.setStyle(tbl_style)
             story.append(table)
             story.append(Spacer(1, 8))
@@ -1914,11 +2039,11 @@ ORDER BY ABS(diferencia) DESC;
                     data.append([
                         it["code"],
                         it["description"],
-                        str(it["encajas"]),
-                        str(it["sueltos"]),
-                        str(it["total"]),
-                        str(it["actual"]),
-                        str(it["diferencia"]) if it.get("diferencia") is not None else "",
+                        _fmt_int(it.get("encajas", 0)),
+                        _fmt_int(it.get("sueltos", 0)),
+                        _fmt_int(it.get("total", 0)),
+                        _fmt_int(it.get("actual", 0)),
+                        _fmt_int(it.get("diferencia", 0)) if it.get("diferencia") is not None else "",
                     ])
 
                 table = Table(data, repeatRows=1, hAlign="LEFT", colWidths=[80, 340, 50, 50, 60, 60, 60])
@@ -1931,6 +2056,17 @@ ORDER BY ABS(diferencia) DESC;
                     ("LEFTPADDING", (0, 0), (-1, -1), 4),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                 ])
+                try:
+                    hdrs = data[0] if data else []
+                    numeric_keys = ('total', 'caja', 'cajas', 'inventario', 'actual', 'sueltos', 'sales', 'purchas', 'qty', 'cant', 'magazijn', 'winkel', 'tot')
+                    ncols = [i for i, h in enumerate(hdrs) if any(k in str(h).lower() for k in numeric_keys)]
+                    for i in ncols:
+                        try:
+                            tbl_style.add('ALIGN', (i, 1), (i, -1), 'RIGHT')
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 table.setStyle(tbl_style)
                 story.append(table)
                 story.append(Spacer(1, 8))

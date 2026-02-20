@@ -4,8 +4,10 @@ from typing import Optional
 from tkinter import filedialog, messagebox
 
 DEFAULT_DB = "inventariovlm.db"
+import logging
 
-print('DEBUG: ui_pdf_report_resumen module loaded')
+logger = logging.getLogger(__name__)
+logger.debug('ui_pdf_report_resumen module loaded')
 
 
 def _asksave(parent: Optional[object], default_name: Optional[str] = None) -> Optional[str]:
@@ -297,15 +299,28 @@ def generate_pdf_report_diferencias_resumen(parent, db_path: str = DEFAULT_DB):
         # pad to expected length
         while len(vals) < 8:
             vals.append('')
+        def _fmt_int(x):
+            try:
+                # convert to number and round to int
+                n = int(round(float(x)))
+            except Exception:
+                try:
+                    n = int(x)
+                except Exception:
+                    n = 0
+            # format with thousands separator as dot
+            s = f"{n:,}".replace(",", ".")
+            return s
+
         data.append([
             vals[0] or '',
             (vals[1] or '')[:200],
-            str(vals[2] or 0),
-            str(vals[3] or 0),
-            str(vals[4] or 0),
-            str(vals[5] or 0),
-            str(vals[6] or 0),
-            str(abs(vals[7] or 0))
+            _fmt_int(vals[2]),
+            _fmt_int(vals[3]),
+            _fmt_int(vals[4]),
+            _fmt_int(vals[5]),
+            _fmt_int(vals[6]),
+            _fmt_int(abs(vals[7] or 0))
         ])
 
     if len(data) == 1:
@@ -321,6 +336,17 @@ def generate_pdf_report_diferencias_resumen(parent, db_path: str = DEFAULT_DB):
             ('LEFTPADDING', (0, 0), (-1, -1), 4),
             ('RIGHTPADDING', (0, 0), (-1, -1), 4),
         ])
+        try:
+            hdrs = data[0] if data else []
+            numeric_keys = ('total', 'caja', 'cajas', 'inventario', 'actual', 'sueltos', 'sales', 'purchas', 'qty', 'cant', 'magazijn', 'winkel', 'tot', 'dif', 'difer', 'difference')
+            ncols = [i for i, h in enumerate(hdrs) if any(k in str(h).lower() for k in numeric_keys)]
+            for i in ncols:
+                try:
+                    tbl_style.add('ALIGN', (i, 1), (i, -1), 'RIGHT')
+                except Exception:
+                    pass
+        except Exception:
+            pass
         table.setStyle(tbl_style)
         story.append(table)
 
@@ -354,8 +380,486 @@ def add_pdf_report_diferencias_resumen_button(parent_frame, db_path: str = DEFAU
 
 
 def _debug_button_registered():
-    print('DEBUG: add_pdf_report_diferencias_resumen_button available in resumen module')
+    logger.debug('add_pdf_report_diferencias_resumen_button available in resumen module')
 
+
+def _ask_item_conteo_mode(parent) -> Optional[str]:
+    """Ask whether the user wants 'detalle' or 'resumen' for the Item Conteo report.
+
+    Returns 'detalle' or 'resumen' or None if cancelled.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import ttk
+    except Exception:
+        return None
+
+    sel = None
+    win = tk.Toplevel(parent)
+    win.title('Modo Item Conteo')
+    win.transient(parent)
+    try:
+        win.grab_set()
+    except Exception:
+        pass
+
+    frm = ttk.Frame(win, padding=8)
+    frm.pack(fill='both', expand=True)
+
+    ttk.Label(frm, text='Seleccione el modo de reporte:').pack(anchor='w', pady=(0,6))
+    mode_var = tk.StringVar(value='detalle')
+    ttk.Radiobutton(frm, text='Detalle', variable=mode_var, value='detalle').pack(anchor='w')
+    ttk.Radiobutton(frm, text='Resumen', variable=mode_var, value='resumen').pack(anchor='w')
+
+    def _on_ok():
+        nonlocal sel
+        sel = mode_var.get()
+        win.destroy()
+
+    def _on_cancel():
+        nonlocal sel
+        sel = None
+        win.destroy()
+
+    btnf = ttk.Frame(frm)
+    btnf.pack(fill='x', pady=(8,0))
+    ttk.Button(btnf, text='OK', command=_on_ok).pack(side='right', padx=6)
+    ttk.Button(btnf, text='Cancelar', command=_on_cancel).pack(side='right')
+
+    try:
+        pw = getattr(parent, 'winfo_rootx', lambda: 0)(); ph = getattr(parent, 'winfo_rooty', lambda: 0)()
+        win.geometry('+%d+%d' % (pw+60, ph+60))
+    except Exception:
+        pass
+
+    win.wait_window()
+    return sel
+
+
+def generate_pdf_report_item_conteo(parent, db_path: str = DEFAULT_DB):
+    """Generate 'Item Conteo' report in detalle or resumen mode as requested by the user.
+
+        Detail SQL:
+            select ic.code_item item,
+                         ic.count_date,
+                         ic.location AS Ubicacion,
+                         i.description_item item_description,
+                         ic.total
+            from inventory_count ic, items i
+         where i.code_item = ic.code_item
+             and ic.total != 0
+         order by ic.code_item, ic.count_date, ic.location
+
+    Resumen SQL:
+      select ic.code_item item,
+             max(i.description_item) item_description,
+             sum(ic.total) Total
+      from inventory_count ic, items i
+     where i.code_item = ic.code_item
+       and ic.total != 0
+     group by ic.code_item
+     order by ic.code_item
+    """
+    # ask deposits (optional reuse of deposit selection)
+    try:
+        sel_deps = _ask_select_deposits(parent, db_path)
+    except Exception:
+        sel_deps = None
+
+    mode = _ask_item_conteo_mode(parent)
+    if mode is None:
+        return
+
+    file_path = _asksave(parent, default_name=f'Item_Conteo_{mode}')
+    if not file_path:
+        return
+    if not _ensure_reportlab(parent):
+        return
+    if not os.path.exists(db_path):
+        messagebox.showerror('Error', f'No se encontró la base de datos: {db_path}', parent=parent)
+        return
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+
+        if mode == 'detalle':
+            sql = ("select ic.code_item as item, ic.count_date, ic.location AS Ubicacion, "
+                   "i.description_item as item_description, ic.total "
+                   "from inventory_count ic JOIN items i ON i.code_item = ic.code_item " )
+            params = ()
+            where_clauses = ["ic.total != 0"]
+            if sel_deps:
+                placeholders = ','.join('?' for _ in sel_deps)
+                where_clauses.append(f"ic.deposit_id IN ({placeholders})")
+                params = tuple(sel_deps)
+            if where_clauses:
+                sql += ' WHERE ' + ' AND '.join(where_clauses)
+            sql += ' ORDER BY ic.code_item, ic.count_date, ic.location'
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            headers = ['Código', 'Fecha', 'Ubicación', 'Descripción', 'Total']
+        else:
+            sql = ("select ic.code_item as item, max(i.description_item) as item_description, sum(ic.total) as Total "
+                   "from inventory_count ic JOIN items i ON i.code_item = ic.code_item ")
+            params = ()
+            where_clauses = ["ic.total != 0"]
+            if sel_deps:
+                placeholders = ','.join('?' for _ in sel_deps)
+                where_clauses.append(f"ic.deposit_id IN ({placeholders})")
+                params = tuple(sel_deps)
+            if where_clauses:
+                sql += ' WHERE ' + ' AND '.join(where_clauses)
+            sql += ' GROUP BY ic.code_item ORDER BY ic.code_item'
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            headers = ['Código', 'Descripción', 'Total']
+
+        conn.close()
+    except Exception as e:
+        messagebox.showerror('Error', f'Error al leer la base de datos: {e}', parent=parent)
+        return
+
+    # Build PDF
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    styles = getSampleStyleSheet()
+    title_style = styles['Heading1']
+    normal = styles['Normal']
+
+    doc = SimpleDocTemplate(file_path, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+    story = []
+    dep_label = ''
+    if sel_deps:
+        try:
+            conn2 = sqlite3.connect(db_path)
+            cur2 = conn2.cursor()
+            cur2.execute(f"SELECT deposit_description FROM deposits WHERE deposit_id IN ({','.join(['?']*len(sel_deps))})", tuple(sel_deps))
+            descs = [d[0] for d in cur2.fetchall() if d and d[0]]
+            dep_label = ' (' + ', '.join(descs or [str(d) for d in sel_deps]) + ')'
+            conn2.close()
+        except Exception:
+            dep_label = ' (' + ', '.join(str(d) for d in sel_deps) + ')'
+
+    title = f"Item Conteo - {mode.capitalize()}" + (dep_label or '')
+    story.append(Paragraph(title, title_style))
+    story.append(Spacer(1, 8))
+
+    data = [headers]
+
+    def _fmt_int(x):
+        try:
+            n = int(round(float(x)))
+        except Exception:
+            try:
+                n = int(x)
+            except Exception:
+                n = 0
+        return f"{n:,}".replace(',', '.')
+
+    for r in rows:
+        vals = list(r)
+        if mode == 'detalle':
+            # item, count_date, location, description, total
+            # truncate description to keep table compact
+            data.append([vals[0] or '', vals[1] or '', (vals[2] or '')[:80], (vals[3] or '')[:140], _fmt_int(vals[4])])
+        else:
+            data.append([vals[0] or '', (vals[1] or '')[:200], _fmt_int(vals[2])])
+
+    if len(data) == 1:
+        story.append(Paragraph('No hay registros para reportar.', normal))
+    else:
+        # choose col widths
+        if mode == 'detalle':
+            # narrower widths so the table fits comfortably on a landscape A4
+            col_widths = [80, 110, 140, 370, 80]
+        else:
+            col_widths = [120, 540, 120]
+        table = Table(data, repeatRows=1, hAlign='LEFT', colWidths=col_widths)
+        tbl_style = TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d3d3d3')),
+            ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ])
+        # align numeric (total) columns to the right
+        try:
+            if mode == 'detalle':
+                # total is last column (index 4)
+                tbl_style.add('ALIGN', (4, 1), (4, -1), 'RIGHT')
+            else:
+                # resumen: total is column index 2
+                tbl_style.add('ALIGN', (2, 1), (2, -1), 'RIGHT')
+        except Exception:
+            pass
+        table.setStyle(tbl_style)
+        story.append(table)
+
+    try:
+        doc.build(story)
+    except Exception as e:
+        messagebox.showerror('Error', f'Error al generar el PDF: {e}', parent=parent)
+        return
+
+    _open_pdf_file(file_path, parent=parent)
+    messagebox.showinfo('OK', f'Reporte PDF generado: {file_path}', parent=parent)
+
+
+def add_pdf_report_item_conteo_button(parent_frame, db_path: str = DEFAULT_DB, button_text: str = 'Item Conteo'):
+    try:
+        from tkinter import ttk
+        btn = ttk.Button(parent_frame, text=button_text, command=lambda: generate_pdf_report_item_conteo(parent_frame, db_path))
+        try:
+            btn.grid(row=35, column=0, pady=8)
+        except Exception:
+            btn.pack(pady=8)
+        return btn
+    except Exception:
+        from tkinter import Button as _Btn
+        btn = _Btn(parent_frame, text=button_text, command=lambda: generate_pdf_report_item_conteo(parent_frame, db_path))
+        try:
+            btn.grid(row=35, column=0, pady=8)
+        except Exception:
+            btn.pack(pady=8)
+        return btn
+
+
+def _ask_include_quantities(parent) -> Optional[bool]:
+    """Ask the user whether to include quantity columns in the report.
+
+    Returns True if user checked and confirmed, False if unchecked and confirmed,
+    or None if the user cancelled.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import ttk
+    except Exception:
+        return None
+
+    sel = None
+    win = tk.Toplevel(parent)
+    win.title('Opciones de reporte')
+    win.transient(parent)
+    try:
+        win.grab_set()
+    except Exception:
+        pass
+
+    frm = ttk.Frame(win, padding=8)
+    frm.pack(fill='both', expand=True)
+
+    lbl = ttk.Label(frm, text='¿Desea mostrar las cantidades (Inventario y Inventario Actual)?')
+    lbl.pack(anchor='w', pady=(0,6))
+    var = tk.IntVar(value=0)
+    chk = ttk.Checkbutton(frm, text='Mostrar cantidades', variable=var)
+    chk.pack(anchor='w', pady=(0,8))
+
+    def _on_ok():
+        nonlocal sel
+        sel = bool(var.get())
+        win.destroy()
+
+    def _on_cancel():
+        nonlocal sel
+        sel = None
+        win.destroy()
+
+    btnf = ttk.Frame(frm)
+    btnf.pack(anchor='e')
+    ttk.Button(btnf, text='OK', command=_on_ok).pack(side='left', padx=6)
+    ttk.Button(btnf, text='Cancelar', command=_on_cancel).pack(side='left', padx=6)
+
+    try:
+        pw = getattr(parent, 'winfo_rootx', lambda: 0)(); ph = getattr(parent, 'winfo_rooty', lambda: 0)()
+        win.geometry('+%d+%d' % (pw+60, ph+60))
+    except Exception:
+        pass
+
+    win.wait_window()
+    return sel
+
+
+def generate_pdf_report_inventario_por_ubicacion(parent, db_path: str = DEFAULT_DB):
+    """Genera un PDF listando por ubicación: Ubicación, Código, Descripción.
+
+    Opcionalmente muestra también las columnas `Inventario` (ic.total) y
+    `Actual_total_item` (i.current_inventory) si el usuario lo solicita.
+    Se permite filtrar por depósitos (multi-select).
+    """
+    # ask deposits
+    try:
+        sel_deps = _ask_select_deposits(parent, db_path)
+    except Exception:
+        sel_deps = None
+
+    # ask whether to include quantities
+    include_qty = _ask_include_quantities(parent)
+    if include_qty is None:
+        # user cancelled the options dialog
+        return
+
+    # ask save path
+    file_path = _asksave(parent, default_name='reporte_inventario_por_ubicacion')
+    if not file_path:
+        return
+    if not _ensure_reportlab(parent):
+        return
+    if not os.path.exists(db_path):
+        messagebox.showerror('Error', f'No se encontró la base de datos: {db_path}', parent=parent)
+        return
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+
+        # build base SQL
+        cols = [
+            'ic.location AS Ubicacion',
+            'ic.code_item AS Codigo',
+            "COALESCE(i.description_item, '') AS Descripcion",
+        ]
+        if include_qty:
+            cols.extend([
+                'ic.total AS Inventario',
+                'i.current_inventory AS Actual_total_item'
+            ])
+
+        sql = f"SELECT {', '.join(cols)} FROM inventory_count ic JOIN items i ON i.code_item = ic.code_item"
+        params = ()
+        if sel_deps:
+            placeholders = ','.join('?' for _ in sel_deps)
+            sql += f" WHERE ic.deposit_id IN ({placeholders})"
+            params = tuple(sel_deps)
+
+        sql += " ORDER BY ic.location, ic.code_item, ic.count_date"
+        logger.debug('Executing SQL for inventario_por_ubicacion: %s params=%s', sql, params)
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        messagebox.showerror('Error', f'Error al leer la base de datos: {e}', parent=parent)
+        return
+
+    # Build PDF
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    styles = getSampleStyleSheet()
+    title_style = styles['Heading1']
+    normal = styles['Normal']
+
+    doc = SimpleDocTemplate(file_path, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+    story = []
+    dep_label = ''
+    if sel_deps:
+        try:
+            conn2 = sqlite3.connect(db_path)
+            cur2 = conn2.cursor()
+            cur2.execute(f"SELECT deposit_description FROM deposits WHERE deposit_id IN ({','.join(['?']*len(sel_deps))})", tuple(sel_deps))
+            descs = [d[0] for d in cur2.fetchall() if d and d[0]]
+            dep_label = ' (' + ', '.join(descs or [str(d) for d in sel_deps]) + ')'
+            conn2.close()
+        except Exception:
+            dep_label = ' (' + ', '.join(str(d) for d in sel_deps) + ')'
+
+    story.append(Paragraph('Reporte Inventario por Ubicación' + dep_label, title_style))
+    story.append(Spacer(1, 8))
+
+    # headers and table data
+    if include_qty:
+        headers = ['Ubicación', 'Código', 'Descripción', 'Inventario', 'Actual Total (Item)']
+        col_widths = [200, 80, 360, 80, 80]
+    else:
+        # more compact widths so the table fits comfortably on landscape A4
+        headers = ['Ubicación', 'Código', 'Descripción']
+        col_widths = [260, 100, 420]
+
+    data = [headers]
+
+    def _fmt_int(x):
+        try:
+            n = int(round(float(x)))
+        except Exception:
+            try:
+                n = int(x)
+            except Exception:
+                n = 0
+        return f"{n:,}".replace(',', '.')
+
+    for r in rows:
+        if include_qty:
+            # r: Ubicacion, Codigo, Descripcion, Inventario, Actual_total_item
+            u = r[0] or ''
+            c = r[1] or ''
+            dsc = (r[2] or '')[:200]
+            inv = _fmt_int(r[3])
+            actual = _fmt_int(r[4])
+            data.append([u, c, dsc, inv, actual])
+        else:
+            u = r[0] or ''
+            c = r[1] or ''
+            # truncate description more aggressively for the compact layout
+            dsc = (r[2] or '')[:160]
+            data.append([u, c, dsc])
+
+    if len(data) == 1:
+        story.append(Paragraph('No hay registros para reportar.', normal))
+    else:
+        table = Table(data, repeatRows=1, hAlign='LEFT', colWidths=col_widths)
+        tbl_style = TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d3d3d3')),
+            ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ])
+        # align numeric columns to the right when quantities are included
+        try:
+            if include_qty:
+                # 'Inventario' is column index 3 and 'Actual_total_item' is index 4
+                tbl_style.add('ALIGN', (3, 1), (4, -1), 'RIGHT')
+        except Exception:
+            pass
+        table.setStyle(tbl_style)
+        story.append(table)
+
+    try:
+        doc.build(story)
+    except Exception as e:
+        messagebox.showerror('Error', f'Error al generar el PDF: {e}', parent=parent)
+        return
+
+    _open_pdf_file(file_path, parent=parent)
+    messagebox.showinfo('OK', f'Reporte PDF generado: {file_path}', parent=parent)
+
+
+def add_pdf_report_inventario_por_ubicacion_button(parent_frame, db_path: str = DEFAULT_DB, button_text: str = 'Inventario por Ubicación'):
+    try:
+        from tkinter import ttk
+        btn = ttk.Button(parent_frame, text=button_text, command=lambda: generate_pdf_report_inventario_por_ubicacion(parent_frame, db_path))
+        try:
+            btn.grid(row=34, column=0, pady=8)
+        except Exception:
+            btn.pack(pady=8)
+        return btn
+    except Exception:
+        from tkinter import Button as _Btn
+        btn = _Btn(parent_frame, text=button_text, command=lambda: generate_pdf_report_inventario_por_ubicacion(parent_frame, db_path))
+        try:
+            btn.grid(row=34, column=0, pady=8)
+        except Exception:
+            btn.pack(pady=8)
+        return btn
 
 def generate_pdf_report_nocode_items(parent, db_path: str = DEFAULT_DB):
     """Genera un PDF con los registros de la tabla `nocode_items`.
